@@ -9,16 +9,22 @@ from frankapy.proto import PosePositionSensorMessage, ShouldTerminateSensorMessa
 from franka_interface_msgs.msg import SensorDataGroup
 
 from frankapy.utils import min_jerk, min_jerk_weight
+import argparse
 
 import rospy
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--file', '-f', default='franka_traj.pkl')
+    args = parser.parse_args()
+
     fa = FrankaArm()
     fa.reset_joints()
 
     rospy.loginfo('Generating Trajectory')
 
-    pose_traj = pkl.load(open('franka_traj.pkl','rb'))
+    # pose_traj = pkl.load(open('franka_traj.pkl','rb'))
+    pose_traj = pkl.load(open(args.file,'rb'))
 
     T = 10
     dt = 0.01

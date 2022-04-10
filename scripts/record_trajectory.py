@@ -35,6 +35,7 @@ if __name__ == '__main__':
     joints = []
 
     time_since_skill_started = []
+    input('Press [ENTER] to enter guide mode and move the end effector somewhere')
     fa.run_guide_mode(args.time, block=False)
     start_time = time.time()
     last_time = None

@@ -19,13 +19,14 @@ if __name__ == "__main__":
     joints_0 = fa.get_joints()
     p = fa.get_pose()
     p.translation[2] -= 0.2
-    fa.goto_pose(p)
+    fa.goto_pose(p)# block=True
+    input("goto_pose!")
     joints_1 = fa.get_joints()
 
     T = 5
     dt = 0.02
     ts = np.arange(0, T, dt)
-    joints_traj = [min_jerk(joints_1, joints_0, t, T) for t in ts]
+    joints_traj = [min_jerk(joints_1, joints_0, t, T) for t in ts]# joint 1 to joint 0, so is in reverse
 
     rospy.loginfo('Initializing Sensor Publisher')
     pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)

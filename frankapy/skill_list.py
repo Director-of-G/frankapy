@@ -451,7 +451,7 @@ class Skill:
             assert len(weights) == num_weights, \
                     "Incorrect weights len. Should be equal to 6 * num basis * num sensors."
             assert len(initial_sensor_values) == 6 * pose_dmp_info['num_sensors'], \
-                "Incorrect initial sensor values len. Should be equal to 3 * num sensors."
+                "Incorrect initial sensor values len. Should be equal to 6 * num sensors."
 
         assert self._skill_type == SkillType.CartesianPoseSkill or \
                self._skill_type == SkillType.ImpedanceControlSkill, \

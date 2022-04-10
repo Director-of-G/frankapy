@@ -1,5 +1,6 @@
 import argparse
 from frankapy import FrankaArm
+from frankapy import FrankaConstants as FC
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -12,4 +13,4 @@ if __name__ == '__main__':
     if args.open_gripper:
         fa.open_gripper()
     fa.selective_guidance_mode(args.time, use_impedance=True, use_ee_frame=True, 
-                               cartesian_impedances=[600.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                               cartesian_impedances=FC.DEFAULT_CARTESIAN_IMPEDANCES)

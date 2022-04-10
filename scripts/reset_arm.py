@@ -1,5 +1,6 @@
 import argparse
 from frankapy import FrankaArm
+import rospy
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

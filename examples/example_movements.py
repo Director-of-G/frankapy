@@ -1,11 +1,12 @@
 from frankapy import FrankaArm
 import numpy as np
 from autolab_core import RigidTransform
+import rospy
 
 if __name__ == '__main__':
 
     print('Starting robot')
-    fa = FrankaArm()
+    fa = FrankaArm(ros_log_level=rospy.DEBUG)
 
     xtranslation_3cm = RigidTransform(rotation=np.array([
             [1,  0,  0],
@@ -38,8 +39,12 @@ if __name__ == '__main__':
 
     # fa.goto_pose(random_position, use_impedance=False, cartesian_impedances=[3000, 3000, 100, 300, 300, 300])
 
-    fa.goto_joints(desired_joints_1, joint_impedances=[100, 100, 100, 50, 50, 100, 100])
+    print('Starting to move towards joints1')
+    fa.goto_joints(desired_joints_1, joint_impedances=[100, 100, 100, 50, 50, 100, 100], ignore_errors=False, ignore_virtual_walls=True)
+    print('Currently at joints1')
 
-    fa.goto_joints(desired_joints_2, joint_impedances=[100, 100, 100, 50, 50, 100, 100])
+    print('Starting to move towards joints2')
+    fa.goto_joints(desired_joints_2, joint_impedances=[100, 100, 100, 50, 50, 100, 100], ignore_errors=False, ignore_virtual_walls=True)
+    print('Currently at joints2')
 
     #fa.apply_effector_forces_torques(10.0, 0, 0, 0)

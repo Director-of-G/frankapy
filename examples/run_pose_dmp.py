@@ -12,7 +12,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print('Starting robot')
-    fa = FrankaArm();
+    fa = FrankaArm()
 
     with open(args.pose_dmp_weights_file_path, 'rb') as pkl_f:
         pose_dmp_info = pickle.load(pkl_f)

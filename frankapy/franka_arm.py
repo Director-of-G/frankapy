@@ -751,11 +751,13 @@ class FrankaArm:
             skill = Skill(SkillType.JointPositionSkill, 
                           TrajectoryGeneratorType.JointDmpTrajectoryGenerator,
                           feedback_controller_type=FeedbackControllerType.SetInternalImpedanceFeedbackController,
-                          termination_handler_type=TerminationHandlerType.FinalJointTerminationHandler, 
+                          termination_handler_type=TerminationHandlerType.FinalJointTerminationHandler, #!!!!
                           skill_desc=skill_desc)
 
         if initial_sensor_values is None:
-            initial_sensor_values = np.ones(joint_dmp_info['num_sensors']).tolist()
+            # initial_sensor_values = np.ones(joint_dmp_info['num_sensors']).tolist() * 0.5
+            initial_sensor_values = np.ones(joint_dmp_info['num_sensors']) * 1.5
+            initial_sensor_values = initial_sensor_values.tolist()
 
         skill.add_initial_sensor_values(initial_sensor_values)  # sensor values
         
@@ -763,15 +765,17 @@ class FrankaArm:
         
         skill.set_joint_impedances(use_impedance, cartesian_impedances, joint_impedances, k_gains, d_gains)
 
-        if not skill.check_for_contact_params(buffer_time, force_thresholds, torque_thresholds):
-            skill.add_time_termination_params(buffer_time)
+        # if not skill.check_for_contact_params(buffer_time, force_thresholds, torque_thresholds):
+        #     skill.add_time_termination_params(buffer_time) #!!!!!!!!!!!!!!
 
         goal = skill.create_goal()
+        
 
         self._send_goal(goal,
                         cb=lambda x: skill.feedback_callback(x),
                         block=block,
                         ignore_errors=ignore_errors)
+        return goal
 
     def execute_pose_dmp(self, 
                          pose_dmp_info, 

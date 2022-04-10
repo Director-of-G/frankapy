@@ -1,3 +1,5 @@
+## this file only record pose, no joints!!
+
 import argparse
 import time
 from frankapy import FrankaArm
@@ -16,6 +18,7 @@ if __name__ == '__main__':
         fa.open_gripper()
     print('Applying 0 force torque control for {}s'.format(args.time))
     end_effector_position = []
+    input('Press [ENTER] to enter guide mode and move the end effector somewhere')
     fa.run_guide_mode(args.time, block=False)
 
     for i in range(1000):
