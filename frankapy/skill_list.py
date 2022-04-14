@@ -348,6 +348,13 @@ class Skill:
 
         self.add_trajectory_params(joint_trajectory_generator_msg_proto.SerializeToString())
 
+    """
+    Origin code implementation of add_joint_dmp_params
+    Modified version of IRM lab is attched below
+    Modification: 2022/04/14
+    """
+
+    """
     def add_joint_dmp_params(self, run_time, joint_dmp_info, initial_sensor_values):
         assert type(run_time) is float or type(run_time) is int,\
                 "Incorrect run_time type. Should be int or float."
@@ -405,7 +412,70 @@ class Skill:
                                                    initial_sensor_values=initial_sensor_values)
 
         self.add_trajectory_params(joint_dmp_trajectory_generator_msg_proto.SerializeToString())
+    """
 
+    """
+    Modified version of IRM lab
+    Modification: 2022/04/14
+    """
+
+    def add_joint_dmp_params(self, run_time, joint_dmp_info, initial_sensor_values):
+        assert type(run_time) is float or type(run_time) is int,\
+                "Incorrect run_time type. Should be int or float."
+        assert run_time >= 0, "Incorrect run_time. Should be non negative."
+
+        assert type(joint_dmp_info['tau']) is float or type(joint_dmp_info['tau']) is int,\
+                "Incorrect tau type. Should be int or float."
+        assert joint_dmp_info['tau'] >= 0, "Incorrect tau. Should be non negative."
+
+        assert type(joint_dmp_info['alpha']) is float or type(joint_dmp_info['alpha']) is int,\
+                "Incorrect alpha type. Should be int or float."
+        assert joint_dmp_info['alpha'] >= 0, "Incorrect alpha. Should be non negative."
+
+        assert type(joint_dmp_info['beta']) is float or type(joint_dmp_info['beta']) is int,\
+                "Incorrect beta type. Should be int or float."
+        assert joint_dmp_info['beta'] >= 0, "Incorrect beta. Should be non negative."
+
+        assert type(joint_dmp_info['num_basis']) is float or type(joint_dmp_info['num_basis']) is int,\
+                "Incorrect num basis type. Should be int or float."
+        assert joint_dmp_info['num_basis'] >= 0, "Incorrect num basis. Should be non negative."
+
+        assert type(joint_dmp_info['num_sensors']) is float or type(joint_dmp_info['num_sensors']) is int,\
+                "Incorrect num sensors type. Should be int or float."
+        assert joint_dmp_info['num_sensors'] >= 0, "Incorrect num sensors. Should be non negative."
+
+        assert type(joint_dmp_info['mu']) is list, "Incorrect basis mean type. Should be list."
+        assert len(joint_dmp_info['mu']) == joint_dmp_info['num_basis'], \
+                "Incorrect basis mean len. Should be equal to num basis."
+
+        assert type(joint_dmp_info['h']) is list, "Incorrect basis std dev type. Should be list."
+        assert len(joint_dmp_info['h']) == joint_dmp_info['num_basis'], \
+                "Incorrect basis std dev len. Should be equal to num basis."
+
+        assert type(initial_sensor_values) is list, "Incorrect initial sensor values type. Should be list."
+        assert len(initial_sensor_values) == 7, \
+                "Incorrect initial sensor values len. Should be equal to num sensors."
+
+        weights = np.array(joint_dmp_info['weights']).reshape(-1).tolist()
+        num_weights = 7 * int(joint_dmp_info['num_basis'])
+
+        assert len(weights) == num_weights, \
+                "Incorrect weights len. Should be equal to 7 * num basis."
+
+        assert self._skill_type == SkillType.ImpedanceControlSkill or \
+               self._skill_type == SkillType.JointPositionSkill, \
+                "Incorrect skill type. Should be ImpedanceControlSkill or JointPositionSkill."
+        assert self._trajectory_generator_type == TrajectoryGeneratorType.JointDmpTrajectoryGenerator, \
+                "Incorrect trajectory generator type. Should be JointDmpTrajectoryGenerator"
+
+        joint_dmp_trajectory_generator_msg_proto = JointDMPTrajectoryGeneratorMessage(run_time=run_time, 
+                                                   tau=joint_dmp_info['tau'], alpha=joint_dmp_info['alpha'], beta=joint_dmp_info['beta'], 
+                                                   num_basis=joint_dmp_info['num_basis'], num_sensor_values=joint_dmp_info['num_sensors'], 
+                                                   basis_mean=joint_dmp_info['mu'], basis_std=joint_dmp_info['h'], 
+                                                   weights=np.array(joint_dmp_info['weights']).reshape(-1).tolist(), 
+                                                   initial_sensor_values=initial_sensor_values)
+
+        self.add_trajectory_params(joint_dmp_trajectory_generator_msg_proto.SerializeToString())
 
     def _check_dmp_info_parameters(self, dmp_info):
         assert type(dmp_info['tau']) in (float, int), "Incorrect tau type. Should be int or float."

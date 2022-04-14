@@ -7,6 +7,7 @@ from sklearn.linear_model import RidgeCV
 from sklearn.linear_model import Ridge
 
 from scipy.signal import savgol_filter
+from scipy.interpolate import interp1d
 from transformations import euler_matrix, euler_from_matrix
 
 from my_dmp.utils import get_local_ref_frame_rot_mat
@@ -806,3 +807,180 @@ class DMPTrajectory(object):
             #print(a.read())
 
         #print("Saved weights to csv")
+
+class MyCanonicalSystem():
+    # Currently only finished the canonical system for discrete DMP
+    def __init__(self, alpha_x, dt) -> None:
+        self.x0 = 1.0
+        self.x = 1.0
+        self.dt = 0.01 if dt is None else dt
+        self.alpha_x = 1.0 if alpha_x is None else alpha_x
+
+        self.run_time = 1.0
+        self.time_steps = round(self.run_time / self.dt)
+
+    def run(self, tau=1.0):
+        time_steps = int(self.time_steps / tau) if tau != 1.0 else self.time_steps
+        self.x = self.x0
+
+        self.x_all = np.zeros(time_steps)
+
+        for t in range(time_steps):
+            self.x_all[t] = self.x
+            dx = -tau * self.alpha_x * self.x * self.dt
+            self.x += dx
+
+        return self.x_all
+    
+    def step(self, tau=None):
+        dx = -tau * self.alpha_x * self.x * self.dt
+        self.x += dx
+
+        return self.x
+        
+
+class MyDMPTrajectory(object):
+    def __init__(self, dt=None, alpha_x=None, alpha_y=None, beta_y=None, num_dims=7, num_basis=100):
+        self.tau = 1.0
+
+        self.num_dims = num_dims
+        self.num_basis = num_basis
+
+        self.y0 = np.zeros(num_dims)
+        self.y_demo = np.zeros_like(self.y0)
+        self.goal = np.zeros_like(self.y0)
+
+        self.dt = 0.01 if dt is None else dt
+        self.alpha_x = 1.0 if alpha_x is None else alpha_x
+        self.alpha_y = np.ones(num_dims) * 60.0 if alpha_y is None else alpha_y
+        self.beta_y = self.alpha_y / 4.0 if beta_y is None else beta_y
+
+        self.w  = np.zeros((num_dims, num_basis))  # weights matrix for all the basis
+        self.mu_all = np.zeros(num_basis)  # gaussian centers for all the basis
+        self.h_all = np.ones(num_basis)  # gaussian variance for all the basis
+
+        self.cs = MyCanonicalSystem(alpha_x, dt)
+
+        t_centers = np.linspace(0, self.cs.run_time, self.num_basis)
+        t_track = np.linspace(0, self.cs.run_time, self.cs.time_steps)
+        x_track = self.cs.run(tau=1.0)
+
+        for n in range(len(t_centers)):
+            for idx, t in enumerate(t_track):
+                if abs(t_centers[n] - t) <= dt:
+                    self.mu_all[n] = x_track[idx]
+
+        self.h_all = self.h_all * num_basis ** 1.5 / (self.mu_all * self.alpha_x)
+        
+        self.y = self.y0.copy()
+        self.dy = np.zeros_like(self.y)
+        self.ddy = np.zeros_like(self.dy)
+
+    def reset(self):
+        self.y = self.y0.copy()
+        self.dy = np.zeros_like(self.y)
+        self.ddy = np.zeros_like(self.dy)
+        self.cs.x = self.cs.x0
+
+    def train(self, y_demo):
+        """
+            train dmp and return the weights of basis
+            total_time: cs.run_time (default: 1.0s)
+            dt:         cs.dt       (1 / length of y_demo)
+        """
+        # y_demo (time_steps, 7)
+        n_points = y_demo.shape[1]
+        time_steps = self.cs.time_steps
+        self.y0 = y_demo[:, 0].copy()
+        self.goal = y_demo[:, -1].copy()
+        self.y_demo = y_demo.copy()
+
+        # interpolation
+        x = np.linspace(0, self.cs.run_time, n_points)
+        y_demo = np.zeros((self.num_dims, time_steps))
+        for dim in range(self.num_dims):
+            y_interp = interp1d(x, self.y_demo[dim, :])
+            for t in range(time_steps):
+                y_demo[dim, t] = y_interp(t * self.dt)
+
+        # calculate derivatives
+        dy_demo = np.gradient(y_demo, axis=1) / self.dt
+        ddy_demo = np.gradient(dy_demo, axis=1) / self.dt
+
+        # all of the following: x_track, f_target, y_demo, dy_demo, ddy_demo are of length=time_steps
+        x_track = self.cs.run()  # (time_steps,)
+        f_target = np.zeros((time_steps, self.num_dims))
+        for dim in range(self.num_dims):
+            k = self.alpha_y[dim]
+            tmp_f_target = ddy_demo[dim, :] - self.alpha_y[dim] * (self.beta_y[dim] * (self.goal[dim] - y_demo[dim]) - dy_demo[dim])
+            f_target[:, dim] = tmp_f_target / k + x_track * (self.goal[dim] - self.y0[dim])
+
+        # calculating weights
+        psi_track = np.exp(-self.h_all * (x_track.reshape(-1, 1) - self.mu_all) ** 2)  # (time_steps, num_basis)
+
+        for dim in range(self.num_dims):
+            for b in range(self.num_basis):
+                basis = psi_track[:, b]
+                f = f_target[:, dim]
+                self.w[dim, b] = np.sum(x_track * basis * f) / np.sum(x_track * basis * x_track)
+
+        return self.w
+
+    def execute(self, tau=None, initial=None, goal=None):
+        tau = 1.0 if tau is None else tau
+        time_steps = round(self.cs.time_steps / tau)
+
+        y0 = initial if initial is not None else self.y0
+        goal = goal if goal is not None else self.goal
+
+        self.reset()
+
+        # reproduce trajectory
+        y_rep = np.zeros((time_steps, self.num_dims))
+        dy_rep = np.zeros_like(y_rep)
+        ddy_rep = np.zeros_like(y_rep)
+
+        y = y0
+        dy = np.zeros_like(y)
+        ddy = np.zeros_like(dy)
+
+        for t in range(time_steps):
+            x_current = self.cs.step(tau)
+            psi_current = np.exp(-self.h_all * (x_current - self.mu_all) ** 2)
+            for dim in range(self.num_dims):
+                k = self.alpha_y[dim]
+                f_rep = np.dot(psi_current, self.w[dim, :]) * x_current / np.sum(psi_current) - (goal[dim] - y0[dim]) * x_current
+                f_rep *= k
+
+                ddy[dim] = self.alpha_y[dim] * (self.beta_y[dim] * (goal[dim] - y[dim]) - dy[dim]) + f_rep
+                dy[dim] += tau * ddy[dim] * self.dt
+                y[dim] += tau * dy[dim] * self.dt
+
+            y_rep[t, :], dy_rep[t, :], ddy_rep[t, :] = y, dy, ddy
+        
+        return y_rep, dy_rep, ddy_rep
+
+
+if __name__ == '__main__':
+    import pickle
+    state_dict = pickle.load(open('/home/roboticslab/yxj/frankapy/traj0408.pkl', "rb"))
+    q = state_dict[0]["skill_state_dict"]['q']
+    print(q.shape)
+    dt = 1 / len(q)
+    dmp_trajectory = MyDMPTrajectory(dt=dt, num_dims=7, num_basis=1000)
+    weights = dmp_trajectory.train(q.transpose(1, 0))
+
+    np.save('/home/roboticslab/yxj/frankapy/cfg/joint_dmp_weights_0414.npy', weights)
+    
+    import matplotlib.pyplot as plt
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(q)
+    plt.legend(['joint0', 'joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6'])
+
+    y, dy, ddy = dmp_trajectory.execute(tau=1.0)
+    plt.subplot(1, 2, 2)
+    plt.plot(y)
+    plt.legend(['joint0', 'joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6'])
+   
+    plt.show()

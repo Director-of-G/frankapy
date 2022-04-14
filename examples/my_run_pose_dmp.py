@@ -66,11 +66,12 @@ if __name__ == '__main__':
     print(pose_dmp_info)
     pose_dmp_info['tau'] *= 1.0
 
-    initial_sensor_values = np.linspace(1.0, 1.5, 6)
-    # initial_sensor_values = [1]
+    # initial_sensor_values = np.linspace(1.0, 1.5, 6)
+    initial_sensor_values = [1]
     # base_initial_sensor_value = np.array([1, 1.5, 1.5, 1.5, 1, 1.5, 1])
     base_initial_sensor_value = np.ones(7,)
     initial_joint_error = np.zeros((len(initial_sensor_values), 7))
+    joints_memory = []
     for iter, current_initial_sensor_value in enumerate(initial_sensor_values):
         print('==============================>')
         print('round: (%d/%d) | init sensor val: %.2f' % (iter, len(initial_sensor_values), current_initial_sensor_value))
@@ -94,13 +95,29 @@ if __name__ == '__main__':
         fa.execute_pose_dmp(pose_dmp_info=pose_dmp_info,
                             duration=(10/1.0),
                             initial_sensor_values=np.ones((6 * 6)).tolist(),
-                            block=True)
+                            block=False)
+
+        import time
+        timer = rospy.Rate(50)
+        start_time = time.time()
+        while True:
+            end_time = time.time()
+            if (end_time - start_time) >= 10.0:
+                break
+            joints_memory.append(fa.get_joints().tolist())
+            timer.sleep()
+
 
         initial_joint_error[iter, :] = fa.get_joints() - current_home_joints
         print('The robot has reached the goal!')
         print('(g - y_0) in current iteration: ', initial_joint_error[iter, :])
     np.save('dmp_pose_error_data.npy', initial_joint_error)
     print('The robot stopped!')
+
+    plt.figure()
+    plt.plot(joints_memory)
+    plt.show()
+
     # reproduced_file = 'reproduced_traj0407.pkl'
     # with open(reproduced_file, 'wb') as pkl_f:
     #     pickle.dump(goal, pkl_f)

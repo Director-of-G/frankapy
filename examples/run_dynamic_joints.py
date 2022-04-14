@@ -18,6 +18,8 @@ if __name__ == "__main__":
     rospy.loginfo('Generating Trajectory')
     joints_0 = fa.get_joints()
     p = fa.get_pose()
+    p.translation[0] += 0.1
+    p.translation[1] += 0.1
     p.translation[2] -= 0.2
     fa.goto_pose(p)# block=True
     input("goto_pose!")
