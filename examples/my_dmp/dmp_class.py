@@ -928,6 +928,7 @@ class MyDMPTrajectory(object):
 
     def execute(self, tau=None, initial=None, goal=None):
         tau = 1.0 if tau is None else tau
+
         time_steps = round(self.cs.time_steps / tau)
 
         y0 = initial if initial is not None else self.y0
