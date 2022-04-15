@@ -9,46 +9,49 @@ if __name__ == "__main__":
     
     # reset franka to its home joints
     fa.reset_joints()
+    joints = fa.get_joints()
+    joints += np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -np.pi/2])
+    fa.goto_joints(joints=joints, block=True)
 
     # read functions
     T_ee_world = fa.get_pose()
     print('Translation: {} | Rotation: {}'.format(T_ee_world.translation, T_ee_world.quaternion))
 
-    joints = fa.get_joints()
-    print('Joints: {}'.format(joints))
+    # joints = fa.get_joints()
+    # print('Joints: {}'.format(joints))
 
-    gripper_width = fa.get_gripper_width()
-    print('Gripper width: {}'.format(gripper_width))
+    # gripper_width = fa.get_gripper_width()
+    # print('Gripper width: {}'.format(gripper_width))
 
-    # gripper controls
-    print('Closing gripper')
-    fa.close_gripper()
+    # # gripper controls
+    # print('Closing gripper')
+    # fa.close_gripper()
 
-    print('Opening gripper to a specified position')
-    fa.goto_gripper(0.02)
+    # print('Opening gripper to a specified position')
+    # fa.goto_gripper(0.02)
 
-    print('Opening gripper all the way')
-    fa.open_gripper()
+    # print('Opening gripper all the way')
+    # fa.open_gripper()
 
-    # joint controls
-    print('Rotating last joint')
-    joints = fa.get_joints()
-    joints[6] += np.deg2rad(45)
-    fa.goto_joints(joints)
-    joints[6] -= np.deg2rad(45)
-    fa.goto_joints(joints)
+    # # joint controls
+    # print('Rotating last joint')
+    # joints = fa.get_joints()
+    # joints[6] += np.deg2rad(45)
+    # fa.goto_joints(joints)
+    # joints[6] -= np.deg2rad(45)
+    # fa.goto_joints(joints)
 
-    # end-effector pose control
-    print('Translation')
-    T_ee_world = fa.get_pose()
-    T_ee_world.translation += [0.1, 0, 0.1]
-    fa.goto_pose(T_ee_world)
-    T_ee_world.translation -= [0.1, 0, 0.1]
-    fa.goto_pose(T_ee_world)
+    # # end-effector pose control
+    # print('Translation')
+    # T_ee_world = fa.get_pose()
+    # T_ee_world.translation += [0.1, 0, 0.1]
+    # fa.goto_pose(T_ee_world)
+    # T_ee_world.translation -= [0.1, 0, 0.1]
+    # fa.goto_pose(T_ee_world)
 
     print('Rotation in end-effector frame')
     T_ee_rot = RigidTransform(
-        rotation=RigidTransform.x_axis_rotation(np.deg2rad(45)),
+        rotation=RigidTransform.y_axis_rotation(np.deg2rad(10)),
         from_frame='franka_tool', to_frame='franka_tool'
     )
     T_ee_world_target = T_ee_world * T_ee_rot
