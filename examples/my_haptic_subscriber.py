@@ -32,10 +32,12 @@ def start_franka_arm():
     joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
     fa.goto_joints(joints=joints, block=True)
 
-    fa.goto_gripper(width=0.01, 
+    fa.open_gripper(block=True)
+    time.sleep(3)
+    fa.goto_gripper(width=0.02, 
                     grasp=True,
                     speed=0.04,
-                    force=10,
+                    force=0.5,
                     block=True)
 
     return fa
@@ -79,6 +81,7 @@ class haptic_subscrbe_handler(object):
         self.command_idx = 0
 
         self.y_max_half_width = 0.3  # the maximum distance the gripper moves from its origin position along the y axis
+        self.haptic_position_scale = 4
 
         self.get_franka_initial_state()
         self.initialize_controller()
@@ -96,12 +99,16 @@ class haptic_subscrbe_handler(object):
         self.init_time = rospy.Time.now().to_time()
 
     def haptic_position_callback(self, msg):
-        position_received = 2 * np.array([msg.x, msg.y, msg.z])
+        position_received = self.haptic_position_scale * np.array([msg.x, msg.y, msg.z])
         self.position_ee_d = position_received.tolist()
-        assert len(self.position_ee_d) == 3 and np.all(np.abs(position_received) <= 0.3)
+        assert len(self.position_ee_d) == 3 and np.all(np.abs(position_received) <= 0.45)
         # print('[x, y, z] from Omega3: ', self.position_ee_d)
 
-        rot_ang = (msg.y / self.y_max_half_width) * 60
+        rot_ang = (msg.y / 0.1) * 70
+        if rot_ang >= 70:
+            rot_ang = 70
+        elif rot_ang <= -70:
+            rot_ang = -70
 
         T_ee_rot = RigidTransform(
             rotation=RigidTransform.y_axis_rotation(np.deg2rad(rot_ang)),
@@ -117,7 +124,7 @@ class haptic_subscrbe_handler(object):
             self.gripper_state = "closed"
             # here should add judgement for whether the object is actually grasped, now we assume is
             self.is_grasped = True
-        if self.gripper_state == "opening" and fa.get_gripper_width() >= 0.068:
+        if self.gripper_state == "opening" and fa.get_gripper_width() >= 0.073:
             self.gripper_state = "opened"
             self.is_grasped = False
 
@@ -131,7 +138,7 @@ class haptic_subscrbe_handler(object):
             self.is_grasped = True
 
         elif (msg.data[0] == 1 and self.gripper_state == "closed" and self.is_grasped):
-            fa.goto_gripper(width=0.07,
+            fa.goto_gripper(width=0.075,
                             speed=0.04,
                             grasp=False,
                             block=False)

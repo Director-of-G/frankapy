@@ -13,6 +13,8 @@ from frankapy import FrankaConstants as FC
 from my_dmp.processing import *
 from my_dmp.dmp_class import *
 
+SAVE_PATH_PRE_FIX = './data/0415'
+
 
 def my_make_joint_dmp_info(tau, alpha_y, beta_y, num_dims, num_basis, alpha_x, mu, h, weights):
     return {
@@ -44,12 +46,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # path constants
-    parser.add_argument('--traj_path', '-tp', type=str, default='./data/0415/traj_0415.pkl',
+    parser.add_argument('--traj_path', '-tp', type=str, default=SAVE_PATH_PRE_FIX + '/traj_0415.pkl',
                         help='Path of the expert trajectory.')
-    parser.add_argument('--memory_path', '-mp', type=str, default='./data/0415/joints_memory.txt',
+    parser.add_argument('--memory_path', '-mp', type=str, default=SAVE_PATH_PRE_FIX + '/joints_memory.txt',
                         help='Path of real Franka joint angles, recorded by Franka Interface.')
-    parser.add_argument('--dmp_weights_path', '-wp', type=str, default='./data/0415/joint_dmp_weights.pkl',
+    parser.add_argument('--dmp_weights_path', '-wp', type=str, default=SAVE_PATH_PRE_FIX + '/joint_dmp_weights.pkl',
                         help='Path of the calculated dmp weight to save.')
+    parser.add_argument('--save_path', '-sp', type=str, default=SAVE_PATH_PRE_FIX)
 
     # frequency constants
     parser.add_argument('--record_frequency', '-rf', type=float, default=10,
@@ -60,7 +63,8 @@ if __name__ == '__main__':
                               see franka_interface: joint_dmp_trajectory_generator.cpp for details.')
 
     # other constants
-    parser.add_argument('--run_time', '-rt', type=float, default=40.0)
+    parser.add_argument('--run_time', '-rt', type=float, default=31.0)
+    parser.add_argument('--tau', '-tau', type=float, default=1)
 
     args = parser.parse_args()
 
@@ -106,7 +110,7 @@ if __name__ == '__main__':
     plt.title('expert trajectory')
 
     # reproduce trajectory
-    tau_reproduce = 1.0
+    tau_reproduce = args.tau
     freqency_scale = args.record_frequency / args.execute_frequency
     time_steps_reproduce = round(dmp_trajectory.cs.time_steps / (tau_reproduce * freqency_scale))
     y, dy, ddy = dmp_trajectory.execute(tau=(tau_reproduce * freqency_scale))
@@ -127,8 +131,7 @@ if __name__ == '__main__':
     mu, h = joint_dmp_info_dict['mu'], joint_dmp_info_dict['h']
     weights = joint_dmp_info_dict['weights']
 
-    tau = 1.0
-    tau = compute_tau_for_franka_interface(tau=tau,
+    tau = compute_tau_for_franka_interface(tau=args.tau,
                                            expert_traj_len=len(q),
                                            record_hz=args.record_frequency,
                                            execute_hz=args.execute_frequency)
@@ -157,7 +160,7 @@ if __name__ == '__main__':
 
     test_rounds = 1
 
-    joints_memory, pose_memory = [], []
+    joints_memory, pose_trans_memory, pose_rot_memory, execution_time = [], [], [], []
     for iter in range(test_rounds):
         print('==============================>')
         print('round: (%d/%d) ' % (iter, test_rounds))
@@ -169,9 +172,15 @@ if __name__ == '__main__':
         joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
         fa.goto_joints(joints=joints, block=True)
 
-        current_home_joints = fa.get_joints()
-        print('Home joints: ', current_home_joints)
-        print('Resetting robot to home joints!')
+        fa.open_gripper(block=True)
+        time.sleep(3)
+        fa.goto_gripper(width=0.02, 
+                        grasp=True,
+                        speed=0.04,
+                        force=0.5,
+                        block=True)
+
+        print('Resetting robot to home joints and home gripper!')
 
         """
             DEFAULT_K_GAINS = [600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0]
@@ -199,21 +208,30 @@ if __name__ == '__main__':
             if (end_time - start_time) >= args.run_time:
                 break
             joints_memory.append(fa.get_joints().tolist())
-            pose_memory.append(fa.get_pose().translation)
+            pose_trans_memory.append(fa.get_pose().translation)
+            pose_rot_memory.append(fa.get_pose().rotation)
+            execution_time.append(end_time - start_time)
             timer.sleep()
 
         print('The robot has reached the goal!')
 
-    joints = np.loadtxt(args.memory_path, dtype=float, delimiter=' ')
-    print(joints.shape)
-    plt.subplot(2, 2, 3)
-    plt.plot(joints)
+    fa.open_gripper()
+
+    # joints = np.loadtxt(args.memory_path, dtype=float, delimiter=' ')
+    # print(joints.shape)
+    # plt.subplot(2, 2, 3)
+    # plt.plot(joints)
     
     print('The robot stopped!')
     plt.subplot(2, 2, 4)
-    plt.plot(joints_memory)
+    plt.plot(execution_time, joints_memory)
+    np.save(args.save_path + '/joints_angle_memory_0415.npy', joints_memory)
     plt.show()
 
     plt.figure()
-    plt.plot(pose_memory)
+    plt.plot(execution_time, pose_trans_memory)
+    np.save(args.save_path + '/ee_trans_memory_0415.npy', pose_trans_memory)
     plt.show()
+
+    np.save(args.save_path + '/ee_rot_memory_0415.npy', pose_rot_memory)
+    np.save(args.save_path + '/execution_time_0415.npy', execution_time)
