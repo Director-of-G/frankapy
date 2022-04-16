@@ -5,15 +5,19 @@ import rospy
 import argparse
 import pickle
 import time
+import copy
 from matplotlib import pyplot as plt
 # from autolab_core import RigidTransform, Point
-from frankapy import FrankaArm
+from frankapy import FrankaArm, SensorDataMessageType
 from frankapy import FrankaConstants as FC
+from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
+from frankapy.proto import JointPositionSensorMessage, ShouldTerminateSensorMessage
+from franka_interface_msgs.msg import SensorDataGroup
 
 from my_dmp.processing import *
 from my_dmp.dmp_class import *
 
-SAVE_PATH_PRE_FIX = './data/0415'
+SAVE_PATH_PRE_FIX = './data/0416'
 
 
 def my_make_joint_dmp_info(tau, alpha_y, beta_y, num_dims, num_basis, alpha_x, mu, h, weights):
@@ -42,11 +46,48 @@ def compute_tau_for_franka_interface(tau, expert_traj_len, record_hz, execute_hz
     """
     return tau * (record_hz / execute_hz) * (100 / expert_traj_len)
 
+def reset_arm_with_recorded_traj(traj, reset_time):
+    assert reset_time > 10
+
+    franka_arm_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+    traj_inv = traj[::-1]
+    fa.goto_joints(joints=traj_inv[0], duration=reset_time + 1, dynamic=True, buffer_time=10,
+                   joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES)
+    init_time = rospy.Time.now().to_time()
+    i = 0
+
+    rate = rospy.Rate(len(traj_inv) / reset_time)
+    
+    while not rospy.is_shutdown():
+        i += 1
+        if i >= len(traj_inv):
+            break
+        traj_gen_proto_msg = JointPositionSensorMessage(
+            id=i, timestamp=rospy.Time.now().to_time() - init_time, 
+            joints=traj_inv[i]
+        )
+        ros_msg = make_sensor_group_msg(
+            trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+            traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION)
+        )
+        
+        rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+        franka_arm_pub.publish(ros_msg)
+        rate.sleep()
+
+    term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - init_time, should_terminate=True)
+    ros_msg = make_sensor_group_msg(
+        termination_handler_sensor_msg=sensor_proto2ros_msg(
+            term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
+        )
+    franka_arm_pub.publish(ros_msg)
+    rospy.loginfo('Done')
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # path constants
-    parser.add_argument('--traj_path', '-tp', type=str, default=SAVE_PATH_PRE_FIX + '/traj_0415.pkl',
+    parser.add_argument('--traj_path', '-tp', type=str, default=SAVE_PATH_PRE_FIX + '/traj.pkl',
                         help='Path of the expert trajectory.')
     parser.add_argument('--memory_path', '-mp', type=str, default=SAVE_PATH_PRE_FIX + '/joints_memory.txt',
                         help='Path of real Franka joint angles, recorded by Franka Interface.')
@@ -84,8 +125,10 @@ if __name__ == '__main__':
     
     # get joint trajectory, goal, and initial joint angles
     q = state_dict[0]["skill_state_dict"]['q']
-    my_goal = q[-1, :]
-    my_y0 = q[0, :]
+    my_goal = copy.deepcopy(q[-1, :])
+    my_y0 = copy.deepcopy(q[0, :])
+
+    # my_goal = [-0.05786455, -0.79165032, -0.48915963, -2.29221188, -1.51290995, 2.01605712, -0.98226636]
 
     # train joint dmp
     dt = 1 / len(q)  # set dt for dmp and cs = (1 / traj_data_points)
@@ -113,7 +156,7 @@ if __name__ == '__main__':
     tau_reproduce = args.tau
     freqency_scale = args.record_frequency / args.execute_frequency
     time_steps_reproduce = round(dmp_trajectory.cs.time_steps / (tau_reproduce * freqency_scale))
-    y, dy, ddy = dmp_trajectory.execute(tau=(tau_reproduce * freqency_scale))
+    y, dy, ddy = dmp_trajectory.execute(tau=(tau_reproduce * freqency_scale), goal=my_goal)
     reproduce_trajectory_time = np.linspace(0,
                                             expert_trajectory_time[-1] / tau_reproduce,
                                             time_steps_reproduce)
@@ -197,7 +240,7 @@ if __name__ == '__main__':
                              duration=args.run_time, 
                              use_impedance=True,
                              k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
-                             d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 25.0],
+                             d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 10.0],
                              initial_sensor_values=my_goal if isinstance(my_goal, list) else my_goal.reshape(-1).tolist(),
                              block=False)
 
@@ -217,21 +260,32 @@ if __name__ == '__main__':
 
     fa.open_gripper()
 
-    # joints = np.loadtxt(args.memory_path, dtype=float, delimiter=' ')
-    # print(joints.shape)
-    # plt.subplot(2, 2, 3)
-    # plt.plot(joints)
+    time.sleep(3)
+
+    reset_arm_with_recorded_traj(copy.deepcopy(joints_memory), reset_time=args.run_time)
+
+    """
+    # plot the joint angles sent by franka-interface
+        joints = np.loadtxt(args.memory_path, dtype=float, delimiter=' ')
+        print(joints.shape)
+        plt.subplot(2, 2, 3)
+        plt.plot(joints)
+    """
     
     print('The robot stopped!')
+
+    # plot the history joint angles Franka acutually executed
     plt.subplot(2, 2, 4)
     plt.plot(execution_time, joints_memory)
-    np.save(args.save_path + '/joints_angle_memory_0415.npy', joints_memory)
+    np.save(args.save_path + '/joints_angle_memory.npy', joints_memory)
     plt.show()
 
+    # plot the history end effector translation Franka acutually executed
     plt.figure()
     plt.plot(execution_time, pose_trans_memory)
-    np.save(args.save_path + '/ee_trans_memory_0415.npy', pose_trans_memory)
+    np.save(args.save_path + '/ee_trans_memory.npy', pose_trans_memory)
     plt.show()
 
-    np.save(args.save_path + '/ee_rot_memory_0415.npy', pose_rot_memory)
-    np.save(args.save_path + '/execution_time_0415.npy', execution_time)
+    # plot the history end effector rotation Franka acutually executed
+    np.save(args.save_path + '/ee_rot_memory.npy', pose_rot_memory)
+    np.save(args.save_path + '/execution_time.npy', execution_time)
