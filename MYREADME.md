@@ -63,7 +63,12 @@
             6. 任务结束后，发布termination_message，参考`./examples/run_dynamic_joints.py`,`./run_dynamic_pose.py`
     * 在franka-interface中添加新的trajectory generator
         * 我们添加了`my_joint_velocity_generator`，可以通过Frankapy中的dynamic control任务`dynamic_joint_velocity`动态控制joint velocity
-        * 参考`joint_trajectory_generator`，添加的文件包括`my_joint_velocity_generator.h/.cpp`，修改的文件包括`trajectory_generator_factory.cpp`
+        * `my_joint_velocity_generator`参考了`joint_trajectory_generator`，添加的文件包括`my_joint_velocity_generator.h/.cpp`，修改的文件包括`trajectory_generator_factory.cpp`,`/franka-interface-common/include/franka-interface-common/definitions.h`.后者文件要和`frankpy/franka_interface_common_definitions.py`在内容、顺序上都一致。
+        * 在写`my_joint_velocity_generator.cpp`时，注意
+            * switch(skill_type)要添加自己写的skilltype，例如`SkillType::MyJointVelocitySkill`.
+            * `parse_parameters`,`get_next_step`在基类`TrajectoryGenerator`中被定义为纯虚函数,一定要在派生类中定义
+        * 改完franka_interface记得编译。先`make_franka_interface.sh`再`make_catkin.sh`
+
 
 
 ### Warning
