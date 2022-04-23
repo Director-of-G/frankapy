@@ -36,6 +36,10 @@
         4. Wait until Franka gripper opens, and you have `3 second` to let it grab something
         5. The robot will reproduce recorded trajectory with joint dmp, released the grasped object, and go back to home position.
 
+* **0417**
+    * To avoid virtual wall collision warning, comment line 38~45 in franka-interface: termination_handler.cpp
+    * added Cartesian translation and rotation velocity limit in my_haptic_subscriber.py
+
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
@@ -49,3 +53,4 @@
 4. Pay ttention to numpy matrix multiply!
     * `*` means element wise multiplication
     * `np.matmul(a, b)` means matrix multiplication
+5. When assert is triggered in callback function of ROS subscriber, the message processing slows down, and then some messages might be discarded when the subscriber queue is full

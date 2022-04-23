@@ -23,6 +23,8 @@ from frankapy.utils import convert_rigid_transform_to_array
 import pickle as pkl
 
 FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0416"
+TRANS_LIMIT = 0.02
+QUAT_LIMIT = 0.02
 
 def start_franka_arm():
     fa = FrankaArm()
@@ -41,8 +43,6 @@ def start_franka_arm():
                     force=0.5,
                     block=True)
 
-    fa.goto_pose()
-
     return fa
 
 def create_formated_skill_dict(joints, end_effector_positions, time_since_skill_started):
@@ -54,6 +54,27 @@ def create_formated_skill_dict(joints, end_effector_positions, time_since_skill_
     # The key (0 here) usually represents the absolute time when the skill was started but
     formatted_dict = {0: skill_dict}
     return formatted_dict
+
+def restrict_cartesian_velocity(translation_d, quat_d):
+    translation_d = copy.deepcopy(translation_d)
+    quat_d = copy.deepcopy(quat_d)
+    current_pose = copy.deepcopy(fa.get_pose())
+    translation = copy.deepcopy(current_pose.translation)
+    quat = copy.deepcopy(current_pose.quaternion)
+
+    for i in range(len(translation_d)):
+        if translation_d[i] >= translation[i] + TRANS_LIMIT:
+            translation_d[i] = translation[i] + TRANS_LIMIT
+        elif translation_d[i] <= translation[i] - TRANS_LIMIT:
+            translation_d[i] = translation[i] - TRANS_LIMIT
+    
+    for j in range(len(quat_d)):
+        if quat_d[j] >= quat[j] + QUAT_LIMIT:
+            quat_d[j] = quat[j] + QUAT_LIMIT
+        elif quat_d[j] <= quat[j] - QUAT_LIMIT:
+            quat_d[j] = quat[j] - QUAT_LIMIT
+
+    return translation_d, quat_d
 
 class haptic_subscrbe_handler(object):
     def __init__(self, args: argparse.Namespace, franka_arm: FrankaArm) -> None:
@@ -88,6 +109,7 @@ class haptic_subscrbe_handler(object):
         self.haptic_position_scale = args.haptic_scale  # if haptic device moves dy, then franka moves haptic_position_scale * dy
         self.record_time = args.record_time  # how long the trajectory teaching would last
         self.record_rate = args.record_rate  # trajectory recording rate
+        self.save_traj = args.save_traj
 
         self.get_franka_initial_state()
         self.initialize_controller()
@@ -100,14 +122,15 @@ class haptic_subscrbe_handler(object):
         self.T_ee_world = copy.deepcopy(self.franka_arm.get_pose())
 
     def initialize_controller(self):
-        self.franka_arm.goto_pose(self.pose_ee_0, duration=self.record_time, dynamic=True, buffer_time=self.record_time,
-                                  cartesian_impedances=FC.DEFAULT_CARTESIAN_IMPEDANCES)
+        self.franka_arm.goto_pose(self.pose_ee_0, duration=self.record_time, dynamic=True, buffer_time=10,
+                                  cartesian_impedances=FC.DEFAULT_CARTESIAN_IMPEDANCES, ignore_virtual_walls=True)
         self.init_time = rospy.Time.now().to_time()
 
     def haptic_position_callback(self, msg):
         position_received = self.haptic_position_scale * np.array([msg.x, msg.y, msg.z])
         self.position_ee_d = position_received.tolist()
-        assert len(self.position_ee_d) == 3 and np.all(np.abs(position_received) <= self.y_max_half_width)
+        assert len(self.position_ee_d) == 3
+        # assert len(self.position_ee_d) == 3 and np.all(np.abs(position_received) <= self.y_max_half_width)
         # print('[x, y, z] from Omega3: ', self.position_ee_d)
 
         """
@@ -171,6 +194,9 @@ class haptic_subscrbe_handler(object):
 
         rospy.loginfo("You can start moving omega 3 now!")
         start_time = time.time()
+
+        send_translation, send_quat = [], []
+        real_translation, real_quat = [], []
         while not rospy.is_shutdown():
             # print(self.command_idx)
             if time.time() - start_time >= self.record_time:
@@ -183,7 +209,7 @@ class haptic_subscrbe_handler(object):
             time_since_skill_started.append(time.time() - start_time)
 
 
-            translation = copy.deepcopy(self.pose_ee_0).translation + np.array(self.position_ee_d)
+            translation = copy.deepcopy(self.pose_ee_0).translation + np.array(copy.deepcopy(self.position_ee_d))
             # pose_ee_delta = RigidTransform(rotation=np.ones((3, 3)), translation=self.position_ee_d, from_frame='franka_tool', to_frame='franka_tool')
             # pose_ee_current = self.pose_ee_0 * pose_ee_delta
             timestamp = rospy.Time.now().to_time() - self.init_time
@@ -198,6 +224,14 @@ class haptic_subscrbe_handler(object):
             # print('quaternion_0: ', R.from_matrix(self.pose_ee_0.rotation).as_quat()[[3, 0, 1, 2]])
             # print('rot_desired', rot.as_matrix())
             # print('rot_ee_0', self.pose_ee_0.rotation)
+            real_pose = fa.get_pose()
+            real_translation.append(real_pose.translation)
+            real_quat.append(real_pose.quaternion)
+
+            translation, quat = restrict_cartesian_velocity(translation, quat)
+
+            send_translation.append(translation)
+            send_quat.append(quat)
             
             traj_gen_proto_msg = PosePositionSensorMessage(
                 id=self.command_idx, timestamp=timestamp, 
@@ -231,26 +265,48 @@ class haptic_subscrbe_handler(object):
         self.franka_arm_pub.publish(ros_msg)
         rospy.loginfo('Done')
 
+        from matplotlib import pyplot as plt
+        send_translation_diff = np.array(send_translation)[1:] - np.array(send_translation)[:-1]
+        send_quat_diff = np.array(send_quat)[1:] - np.array(send_quat)[:-1]
+        plt.figure(2)
+        plt.plot(real_translation)
+        plt.plot(send_translation)
+        plt.show()
+        plt.figure(3)
+        plt.plot(real_quat)
+        plt.plot(send_quat)
+        plt.show()
+        plt.figure(4)
+        plt.plot(send_translation_diff.tolist())
+        plt.show()
+        plt.figure(5)
+        plt.plot(send_quat_diff.tolist())
+        plt.show()
+        print(send_translation_diff.shape)
+        print(send_quat_diff.shape)
+
         # save trajectory
-        skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started)
-        with open(FILE_NAME + '/traj.pkl', 'wb') as pkl_f:
-            pkl.dump(skill_dict, pkl_f)
-            print("Did save skill dict: {}".format(FILE_NAME + '/traj.pkl'))
+        if self.save_traj:
+            skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started)
+            with open(FILE_NAME + '/traj.pkl', 'wb') as pkl_f:
+                pkl.dump(skill_dict, pkl_f)
+                print("Did save skill dict: {}".format(FILE_NAME + '/traj.pkl'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # constants
-    parser.add_argument('--width_y', '-wy', type=str, default=0.45,
+    parser.add_argument('--width_y', '-wy', type=str, default=0.55,  # 0.45
                         help='The maximum distance that end effector can move from home position along the y axis.')
     parser.add_argument('--angle_y', '-ay', type=str, default=70,
                         help='The maximum angle that end effector can rotate around the y axis.')
-    parser.add_argument('--haptic_scale', '-hs', type=str, default=4,
+    parser.add_argument('--haptic_scale', '-hs', type=str, default=6,  # 4
                         help='The moving distance ratio of Franka end effector and haptic.')
     parser.add_argument('--record_time', '-rt', type=str, default=30,
                         help='Time length of the trajectory teaching.')
     parser.add_argument('--record_rate', '-rr', type=str, default=10,
                         help='Frequency of trajectory recording.')
+    parser.add_argument('--save_traj', '-st', action='store_true', default=False)
 
     args = parser.parse_args()
 

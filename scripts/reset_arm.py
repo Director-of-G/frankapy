@@ -9,7 +9,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print('Starting robot')
-    fa = FrankaArm()
+    fa = FrankaArm(with_gripper=False)
 
     if args.use_pose:
         print('Reset with pose')

@@ -19,8 +19,8 @@ if __name__ == "__main__":
     joints_0 = fa.get_joints()
     p = fa.get_pose()
     p.translation[0] += 0.1
-    p.translation[1] += 0.0
-    p.translation[2] += 0.0
+    p.translation[1] -= 0.22
+    p.translation[2] -= 0.1
     fa.goto_pose(p)# block=True
     input("goto_pose!")
     joints_1 = fa.get_joints()

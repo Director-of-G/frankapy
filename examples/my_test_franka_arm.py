@@ -5,15 +5,22 @@ import rospy
 
 import numpy as np
 
+def pose_format(pose_data):
+    a = np.concatenate((pose_data.translation, pose_data.quaternion),axis=0)
+    # print(a)
+    return np.reshape(a,(7,1))
+
 if __name__ == '__main__':
     fa = FrankaArm(ros_log_level=rospy.DEBUG)
 
-    print('Reseting Joints')
-    fa.reset_joints()
+    print(fa.get_pose())
+    print(pose_format(fa.get_pose()))
+    # print('Reseting Joints')
+    # fa.reset_joints()
 
 
 
-    fa.reset_joints()
+    # fa.reset_joints()
 
     # test rotation of single joints
 '''
