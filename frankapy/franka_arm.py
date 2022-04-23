@@ -675,6 +675,87 @@ class FrankaArm:
         if dynamic:
             sleep(FC.DYNAMIC_SKILL_WAIT_TIME)
 
+    """
+    modified by IRM lab
+    Date: 2022/04/23
+    """
+    def dynamic_joint_velocity(self,
+                               joints,
+                               joints_vel,
+                               duration=5,
+                               buffer_time=FC.DEFAULT_TERM_BUFFER_TIME,
+                               force_thresholds=None,
+                               torque_thresholds=None,
+                               cartesian_impedances=None,
+                               joint_impedances=None,
+                               k_gains=None,
+                               d_gains=None,
+                               block=False,
+                               ignore_errors=True,
+                               skill_desc='DynamicJointVelocity'):
+        """
+        Commands Arm to the given joint configuration
+
+        Parameters
+        ----------
+            joints : :obj:`list` 
+                A list of 7 numbers that correspond to joint angles in radians.
+            joints_vel : :obj:`list` 
+                A list of 7 numbers that correspond to joint angular velocities in radians per second.
+            duration : :obj:`float` 
+                How much time this robot motion should take.
+            buffer_time : :obj:`float` 
+                How much extra time the termination handler will wait
+                before stopping the skill after duration has passed.
+            force_thresholds : :obj:`list` 
+                List of 6 floats corresponding to force limits on translation 
+                (xyz) and rotation about (xyz) axes. Default is None. 
+                If None then will not stop on contact.
+            torque_thresholds : :obj:`list` 
+                List of 7 floats corresponding to torque limits on each joint. 
+                Default is None. If None then will not stop on contact.
+            block : :obj:`bool` 
+                Function blocks by default. If False, the function becomes
+                asynchronous and can be preempted.
+            ignore_errors : :obj:`bool` 
+                Function ignores errors by default. If False, errors and some 
+                exceptions can be thrown.
+            ignore_virtual_walls : :obj:`bool` 
+                Function checks for collisions with virtual walls by default. 
+                If False, the robot no longer checks, which may be dangerous.
+            skill_desc : :obj:`str` 
+                Skill description to use for logging on the Control PC.
+
+        Raises:
+            ValueError: If is_joints_reachable(joints) returns False
+        """
+
+        joints = np.array(joints).tolist()
+        joints_vel = np.array(joints_vel).tolist()
+
+        skill = Skill(SkillType.MyJointVelocitySkill, 
+                      TrajectoryGeneratorType.MyJointVelocityGenerator,
+                      feedback_controller_type=FeedbackControllerType.NoopFeedbackController,
+                      termination_handler_type=TerminationHandlerType.TimeTerminationHandler, 
+                      skill_desc=skill_desc)
+
+        skill.add_initial_sensor_values(FC.EMPTY_SENSOR_VALUES)
+
+        skill.set_joint_impedances(False, cartesian_impedances, joint_impedances, k_gains, d_gains)
+
+        if not skill.check_for_contact_params(buffer_time, force_thresholds, torque_thresholds):
+            skill.add_time_termination_params(buffer_time)
+
+        skill.add_goal_joints(duration, joints)
+        goal = skill.create_goal()
+
+        self._send_goal(goal,
+                        cb=lambda x: skill.feedback_callback(x),
+                        block=block,
+                        ignore_errors=ignore_errors)
+
+        sleep(FC.DYNAMIC_SKILL_WAIT_TIME)
+
     def execute_joint_dmp(self, 
                           joint_dmp_info, 
                           duration, 

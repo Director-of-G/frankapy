@@ -23,6 +23,7 @@ class SkillType:
     GripperSkill = _enum_auto('SkillType')
     ImpedanceControlSkill = _enum_auto('SkillType')
     JointPositionSkill = _enum_auto('SkillType')
+    MyJointVelocitySkill = _enum_auto('SkillType')
 
 
 class MetaSkillType:
@@ -53,6 +54,8 @@ class TrajectoryGeneratorType:
     SinePoseTrajectoryGenerator = _enum_auto('TrajectoryGeneratorType')
     StayInInitialJointsTrajectoryGenerator = _enum_auto('TrajectoryGeneratorType')
     StayInInitialPoseTrajectoryGenerator = _enum_auto('TrajectoryGeneratorType')
+    # add by IRM lab on 2022/04/23
+    MyJointVelocityGenerator = _enum_auto('TrajectoryGeneratorType')
 
 
 class FeedbackControllerType:

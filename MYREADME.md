@@ -40,6 +40,31 @@
     * To avoid virtual wall collision warning, comment line 38~45 in franka-interface: termination_handler.cpp
     * added Cartesian translation and rotation velocity limit in my_haptic_subscriber.py
 
+* **0423**
+    * 在Frankapy中添加新的Skill，利用此Skill创建新的任务函数  
+        * 在`franka_interface_common_definitions.py`中选择`SkillType`,`TrajectoryGeneratorType`,`FeedbackControllerType`,`TerminationHandlerType`类型。允许自定义新的类型，命名与franka-interface的`definition.h`保持一致，参考后面部分的介绍  
+        * 在`franka_arm.py`中创建新的任务函数`def execute_XXX()`，定义包含所选择`SkillType`,`TrajectoryGeneratorType`,`FeedbackControllerType`,`TerminationHandlerType`，例如  
+        ```
+            skill = Skill(SkillType.MyJointVelocitySkill, 
+                      TrajectoryGeneratorType.MyJointVelocityGenerator,
+                      feedback_controller_type=FeedbackControllerType.NoopFeedbackController,
+                      termination_handler_type=TerminationHandlerType.TimeTerminationHandler, 
+                      skill_desc=skill_desc)
+        ```
+        * 参考`franka_arm.py`中其他任务函数调用skill的相关方法，如`add_initial_sensor_values()`,`set_joint_impedances()`,`add_goal_joints()`,最关键的是`skill.create_goal()`和`self._send_goal()`，之后frankapy将与franka-interface通信，执行任务
+    * 在Frankapy中添加新的dynamic control任务  
+        * 在dynamic control任务中可以向Franka实时发送joint space或cartesian space的position,velocity实现控制  
+        * 参考`./examples/run_dynamic_joints.py`,`./run_dynamic_pose.py`,之后定义新的dynamic control任务  
+            1. dynamic control任务需要一个发布position,velocity的publisher  
+            2. 执行franka_arm中的某个任务函数，如`fa.goto_joints`，设置参数`dynamic=True`及`block=False`   
+            3. 创建新的dynamic control消息，如`JointPositionSensorMessage`，其他消息类型见`./proto/sensor_msg_pb2.py`，消息类型包含若干字段，详见此文件前半部分的描述。填入各字段，不能有空字段  
+            4. `make_sensor_group_msg`将dynamic control消息封装为rosmsg，1个参数指明此rosmsg属于Skill中3类任务的哪一个，其中`SensorDataMessageType`需要与定义的dynamic control消息类型保持一致  
+            5. 将rosmsg发布到`FC.DEFAULT_SENSOR_PUBLISHER_TOPIC`话题上，注意设置发布的rate  
+            6. 任务结束后，发布termination_message，参考`./examples/run_dynamic_joints.py`,`./run_dynamic_pose.py`
+    * 在franka-interface中添加新的trajectory generator
+        * 我们添加了`my_joint_velocity_generator`，可以通过Frankapy中的dynamic control任务`dynamic_joint_velocity`动态控制joint velocity
+        * 参考`joint_trajectory_generator`，添加的文件包括`my_joint_velocity_generator.h/.cpp`，修改的文件包括`trajectory_generator_factory.cpp`
+
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!

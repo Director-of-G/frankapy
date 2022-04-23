@@ -150,7 +150,7 @@ class Skill:
                 "Incorrect cartesian impedances len. Should be 0 or 6."
         assert len(joint_impedances) == 0 or len(joint_impedances) == 7, \
                 "Incorrect joint impedances len. Should be 0 or 7."
-        assert self._skill_type == SkillType.CartesianPoseSkill or self._skill_type == SkillType.JointPositionSkill, \
+        assert self._skill_type == SkillType.CartesianPoseSkill or self._skill_type == SkillType.JointPositionSkill or self._skill_type == SkillType.MyJointVelocitySkill, \
                 "Incorrect skill type. Should be CartesianPoseSkill or JointPositionSkill."
 
         internal_feedback_controller_msg_proto = \

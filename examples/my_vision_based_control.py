@@ -1,5 +1,5 @@
 import imp
-from frankapy import FrankaArm
+from frankapy import FrankaArm,SensorDataMessageType
 from frankapy import FrankaConstants as FC
 from autolab_core import RigidTransform
 
@@ -20,6 +20,24 @@ import math
 from pyquaternion import Quaternion
 
 import matplotlib.pyplot as plt
+
+from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
+from frankapy.proto import JointPositionVelocitySensorMessage, ShouldTerminateSensorMessage
+from franka_interface_msgs.msg import SensorDataGroup
+
+class JointVelsSubscriber(object):
+    def __init__(self) -> None:
+        self.joint_vels = np.zeros((7,))
+        self.sub_ = rospy.Subscriber('/dyn_franka_joint_vel', JointVelocityCommand, self.callback, queue_size=1)
+
+    def callback(self, msg):
+        if not isinstance(msg.dq_d, np.ndarray):
+            dq_d = np.array(msg.dq_d)
+        else:
+            dq_d = msg.dq_d
+        self.joint_vels = dq_d
+
+
 
 def pose_format(pose_data):
     """
@@ -59,13 +77,18 @@ def error_format(r,r_d):
     error = position_error_list + [angle*x,angle*y,angle*z]
     return np.reshape(np.array(error),(6,1))
 
+
+
 def main():
     fa = FrankaArm()
     
+    pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+
     ros_freq = 30
     rate=rospy.Rate(ros_freq)
 
-    vel_cmd_pub = rospy.Publisher("/dyn_franka_joint_vel",JointVelocityCommand,queue_size=1)
+    # vel_cmd_pub = rospy.Publisher("/dyn_franka_joint_vel",JointVelocityCommand,queue_size=1)
+
     # vision_reader = VisionPosition()
     # vision_sub = rospy.Subscriber("/aruco_single/pixel", PointStamped, vision_reader.callback)
     # hololens_reader = HololensPosition()
@@ -94,7 +117,8 @@ def main():
     tt = 1
 
     # dx = np.reshape([720, 540], [2, 1])
-    r_d = np.reshape([0.5,0,0.5,0,1.0,0,0], [7, 1])#desired position and quaternion(wxyz)
+    # r_d = np.reshape([0.5,0,0.5,0,1.0,0,0], [7, 1])#desired position and quaternion(wxyz)
+    r_d = np.reshape([0.13269275, 0.43067921, 0.28257956,-0.03379123,  0.88253785,  0.42634109, -0.19547999], [7, 1])
     
     Kp = 0.2 * np.eye(6)#TODO
     Cd = np.eye(7)#TODO
@@ -107,6 +131,7 @@ def main():
     t_start = time.time()
     t_last = t_start
     t_ready = t_start
+    i = 0
     print("time begins at: ",t_start)
     # ================================================while begins
     while not rospy.is_shutdown():
@@ -146,6 +171,16 @@ def main():
             flag_initialized = 1
 
         elif flag_initialized == 1:
+            home_joints = fa.get_joints()
+
+            max_execution_time = 30
+
+            fa.dynamic_joint_velocity(joints=home_joints,
+                                    joints_vel=np.zeros((7,)),
+                                    duration=max_execution_time,
+                                    buffer_time=10,
+                                    block=False)
+            
             flag_initialized = 2
             print("initialization is done! the time is:", t - t_start)
             t_ready = t
@@ -221,11 +256,22 @@ def main():
             log_dqdot = np.concatenate((log_dqdot,np.reshape(v, [7, 1])), axis=1)
             log_rdot = np.concatenate((log_rdot,np.reshape(rdot, [6, 1])), axis=1)
 
-            # urscript_speedj_pub(pub,v,a,0.1)
-            joint_vel_cmd = JointVelocityCommand()
-            joint_vel_cmd.dq_d = v
-            joint_vel_cmd.ddq_d = np.ones(7,) * a
-            vel_cmd_pub.publish(joint_vel_cmd)
+            traj_gen_proto_msg = JointPositionVelocitySensorMessage(
+                id=i, timestamp=rospy.Time.now().to_time() - t_ready, 
+                seg_run_time=30.0,
+                joints=home_joints,
+                joint_vels=v.tolist()
+            )
+            ros_msg = make_sensor_group_msg(
+                trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+                    traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION_VELOCITY)
+            )
+            
+            i += 1
+            rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+            pub.publish(ros_msg)
+
+
         else:
             break
 
