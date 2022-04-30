@@ -1,0 +1,70 @@
+<?xml version="1.0" ?>
+<launch>
+    <!-- publish franka joints    -->
+    <!-- <include file="$(find panda_moveit_config)/launch/panda_control_moveit_rviz.launch">
+        <arg name="robot_ip" value="172.16.0.2"/> 
+        <arg name="load_gripper" value="false"/>
+        <arg name="launch_rviz" value="false"/>
+    </include> -->
+
+    <!-- publish usb_cam_frame    -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="to_publish_a_camera_link_frame" 
+        args="0 0 0 0 0 0 1  camera_link camera_color_frame" />
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="to_publish_a_aruco_marker_frame" 
+        args="0.12 0.6108177706978624 0.7797042704589798 0 1 0 0  panda_link0 camera_link" />
+
+    <!-- publish marker_ee_frame -->
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="to_publish_marker_on_ee_frame" 
+        args="0.06429209525498814, 0.06350749893418253, -0.05094707130159837 -0.7301266459288068, -0.6832513335870525, 0.007368466877977015, 0.004771019552465539  panda_EE marker_ee" /> -->
+
+    <!-- (start your tracking system's ROS driver) -->
+    <include file="$(find pylon_camera)/launch/pylon_camera_node.launch"> </include>     
+
+        <!-- fill in the following parameters according to your tracking system -->
+        <arg name="markerId"        default="99"/>      <!-- set your marker id -->
+        <arg name="markerSize"      default="0.039"/>    <!-- in m -->
+        <arg name="marker_frame"    default="aruco_marker_frame"/> 
+        <arg name="ref_frame"       default="camera_link"/>  <!-- leave empty and the pose will be published wrt param parent_name -->
+        <arg name="corner_refinement" default="LINES" /> <!-- NONE, HARRIS, LINES, SUBPIX -->    
+        <arg name="camera_frame" default="camera_color_frame" />
+        <arg name="camera_image_topic" default="/pylon_camera_node/image_rect" />
+        <arg name="camera_info_topic" default="/pylon_camera_node/camera_info" /> 
+
+        <!-- double ArUco marker version-->
+        <arg name="marker1Id"         default="99"/>
+        <arg name="marker2Id"         default="485"/>
+        <arg name="dct_normalization" default="False" />
+        <arg name="dct_filter_size"   default="2" />
+        <arg name="marker1_frame"     default="aruco_hand_frame" />
+        <arg name="marker2_frame"     default="aruco_marker_frame" />
+
+    <!-- single ArUco marker version-->
+    <!-- <node pkg="aruco_ros" type="single" name="aruco_single">
+        <remap to="$(arg camera_info_topic)" from="/camera_info" />
+        <remap to="$(arg camera_image_topic)" from="/image" />
+        <param name="image_is_rectified" value="True"/>
+        <param name="marker_size"        value="$(arg markerSize)"/>
+        <param name="marker_id"          value="$(arg markerId)"/>
+        <param name="reference_frame"    value="camera_link"/>
+        <param name="camera_frame"       value="$(arg camera_frame)"/>
+        <param name="marker_frame"       value="$(arg marker_frame)" />
+        <param name="corner_refinement"  value="$(arg corner_refinement)" />
+    </node> -->
+
+    <!-- double ArUco marker version-->
+    <node pkg="aruco_ros" type="double" name="aruco_simple">    
+        <remap to="$(arg camera_info_topic)" from="/camera_info" />
+        <remap to="$(arg camera_image_topic)" from="/image" />
+        <param name="image_is_rectified" value="True"/>
+        <param name="marker_size" value="$(arg markerSize)"/>
+        <param name="marker_id1" value="$(arg marker1Id)"/>
+        <param name="marker_id2" value="$(arg marker2Id)"/>
+        <param name="normalizeImage" value="$(arg dct_normalization)"/>
+        <param name="dct_components_to_remove" value="$(arg dct_filter_size)"/>
+        <param name="parent_name" value="camera_link"/>
+        <param name="child_name1" value="$(arg marker1_frame)" />
+        <param name="child_name2" value="$(arg marker2_frame)" />
+    </node>
+
+</launch>

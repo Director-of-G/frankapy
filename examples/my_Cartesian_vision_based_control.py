@@ -1,12 +1,12 @@
 import imp
-from frankapy import FrankaArm, SensorDataMessageType
+from frankapy import FrankaArm,SensorDataMessageType
 from frankapy import FrankaConstants as FC
 from autolab_core import RigidTransform
 
 import rospy
 import numpy as np
 
-from vision_pose_get import VisionPosition
+# from vision_pose_get import VisionPosition
 # from hololens_reader import HololensPosition
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PointStamped
@@ -154,7 +154,7 @@ class MarkerPoseSubscriber(object):
             self.marker_pose_camera_frame = copy.deepcopy(received_transform)
             self.marker_pose_robot_frame = copy.deepcopy(self.camera_extrinsics.get_rigid_transform()) * copy.deepcopy(self.marker_pose_camera_frame)
 
-            # print('marker pose in robot frame: ', self.marker_pose_robot_frame)
+            print('marker pose in robot frame: ', self.marker_pose_robot_frame)
             
             desired_pose = self.marker_pose_robot_frame * self.end_effector_to_marker
             
@@ -180,7 +180,7 @@ class MarkerPoseSubscriber(object):
 
     def get_rigid_transform(self):
         return np.hstack((self.end_effector_robot_frame.translation, self.end_effector_robot_frame.quaternion)).reshape(7, 1)
-
+            
 def pose_format(pose_data):
     """
     return: 7x1
@@ -221,10 +221,8 @@ def error_format(r,r_d):
 
 
 def main():
-    dir = '/my_vision_based_control/0429/'
+    dir = '/my_vision_based_control/'
     current_path = os.path.dirname(__file__)
-
-    print(current_path)
     
     fa = FrankaArm()
     
@@ -234,28 +232,28 @@ def main():
     ros_freq = 30
     rate=rospy.Rate(ros_freq)
 
-    vision_reader = VisionPosition()
+    # vel_cmd_pub = rospy.Publisher("/dyn_franka_joint_vel",JointVelocityCommand,queue_size=1)
 
-    vision_sub1 = rospy.Subscriber("/aruco_simple/pixel1", PointStamped, vision_reader.callback1)
-    vision_sub2 = rospy.Subscriber("/aruco_simple/pixel2", PointStamped, vision_reader.callback2)
+    # vision_reader = VisionPosition()
+    # vision_sub = rospy.Subscriber("/aruco_single/pixel", PointStamped, vision_reader.callback)
     # hololens_reader = HololensPosition()
     # sub = rospy.Subscriber("UnityJointStatePublish", JointState, hololens_reader.callback)
 
 
     flag_initialized = 0
 
-    # camera intrinsic parameters
-    projection_matrix = np.reshape(np.array([2337.218017578125, 0, 746.3118044533257, 0,
-                                             0, 2341.164794921875, 564.2590475570069, 0, 
-                                             0, 0, 1, 0]), [3, 4])# according to ost0419.yaml
-    fx = projection_matrix[0,0]
-    fy = projection_matrix[1,1]
-    u0 = projection_matrix[0,2]
-    v0 = projection_matrix[1,2]
+    ## camera intrinsic parameters
+    # projection_matrix = np.reshape(np.array([2340.00415, 0., 753.47694, 0., \
+    #                                          0., 2342.75146, 551.78795, 0., \
+    #                                          0., 0., 1., 0.]), [3, 4])
+    # fx = projection_matrix[0,0]
+    # fy = projection_matrix[1,1]
+    # u0 = projection_matrix[0,2]
+    # v0 = projection_matrix[1,2]
 
     # prepare for logging data
     qdot = np.zeros([7, 1],float)
-    log_x = np.empty([2, 0],float)
+
     log_r = np.empty([7, 0],float)
     log_q = np.empty([7, 0],float)
     log_qdot = np.empty([7, 0],float)
@@ -265,20 +263,19 @@ def main():
     a = 50
     tt = 1
 
-    x_d = np.reshape([720, 540], [2, 1])
+    # dx = np.reshape([720, 540], [2, 1])
     # r_d = np.reshape([0.5,0,0.5,0,1.0,0,0], [7, 1])#desired position and quaternion(wxyz)
     # r_d = np.reshape([0.13269275, 0.43067921, 0.28257956,-0.03379123,  0.88253785,  0.42634109, -0.19547999], [7, 1])
     # r_d = np.reshape([0.15238175, 0.57948289, 0.20484301, -0.0091628, 0.71664203, 0.69585671, 0.04608346], [7, 1])  # 码朝上
-    # r_d = np.reshape([0.16252644, 0.58431606, 0.20523592, 0.06691753, 0.72849338, 0.68122359, -0.02745627], [7, 1])  # 码倾斜
+    r_d = np.reshape([0.16252644, 0.58431606, 0.20523592, 0.06691753, 0.72849338, 0.68122359, -0.02745627], [7, 1])  # 码倾斜
     # r_d = np.reshape([3.06904962e-01, 1.11763435e-04, 4.86721445e-01, -1.40304221e-04, 9.99997553e-01, 2.32293991e-04, -7.84344880e-05], [7, 1])
     
-    Kp = 0.5 * np.eye(2)#TODO
+    Kp = 0.15 * np.eye(6)#TODO
     Cd = np.eye(7)#TODO
 
     time.sleep(0.3)# wait for a short time otherwise q_last is empty
     q_last = fa.get_joints()
-    x_last1 = vision_reader.pos1
-    x_last2 = vision_reader.pos2
+    # x_last = vision_reader.pos
     # k_last = vision_reader.k_pos
     r_last = pose_format(fa.get_pose())
     t_start = time.time()
@@ -297,17 +294,15 @@ def main():
         if len(q_now)==0:
             print("can not get q !!!!!")
             continue
-        x_now = vision_reader.pos1
-        x_d = np.reshape(vision_reader.pos2, [2, 1])
-        x_d = x_d-np.array([[340],[154]])
-        x = x_now
-        k_now = vision_reader.k_pos
+        # x_now = vision_reader.pos
+        # x = x_now
+        # k_now = vision_reader.k_pos
         r_now = pose_format(fa.get_pose())
         r = r_now
 
 
         # 计算雅可比矩阵 J
-        J = fa.get_marker_link_jacobian(q_now)  # (6, 7)
+        J = fa.get_jacobian(q_now)  # (6, 7)
         J_inv = np.linalg.pinv(J)  # (7, 6)
 
 
@@ -320,15 +315,15 @@ def main():
 
         # 给指令
         if flag_initialized == 0:# 先回到初始位置
-            # fa.reset_joints(block=True)
-            # print('Resetting Franka to home joints!')
-            # time.sleep(1)
+            fa.reset_joints(block=True)
+            print('Resetting Franka to home joints!')
+            time.sleep(1)
             flag_initialized = 1
 
         elif flag_initialized == 1:
             home_joints = fa.get_joints()
 
-            max_execution_time = 8
+            max_execution_time = 30
 
             fa.dynamic_joint_velocity(joints=home_joints,
                                       joints_vel=np.zeros((7,)),
@@ -341,11 +336,14 @@ def main():
             t_ready = t
             # fa.run_guide_mode(duration=20,block=False)
 
-            RR = np.array([[-1, 0, 0], \
-                           [0,  1, 0], \
-                           [0, 0, -1]]) # 相机相对于base的旋转矩阵,要转置成base相对于相机才对
-            RR = RR.T
-            x = np.reshape(x, [2, 1])
+            # RR = np.array([[-7.34639719e-01, -6.27919077e-04,  6.78457138e-01], \
+            #                [-6.78432812e-01,  9.19848654e-03, -7.34604865e-01], \
+            #                [-5.77950645e-03, -9.99957496e-01, -7.18357448e-03]]) # 相机相对于base的旋转矩阵,要转置成base相对于相机才对
+            # RR = RR.T
+            # f = 2340
+            # u00 = 753
+            # v00 = 551
+            # x = np.reshape(x, [2, 1])
             # theta_k0 = np.array([[f * RR[0, 0]], \
             #                      [f * RR[0, 1]], \
             #                      [f * RR[0, 2]], \
@@ -364,14 +362,14 @@ def main():
             # theta_k = theta_k0
 
         elif flag_initialized == 2 and t - t_ready < max_execution_time: 
-            # 计算视觉矩阵Js
-            u = x[0] - u0
-            v = x[1] - v0
-            z = 1 # =========================
-            Js = np.array([[fx/z, 0, -u/z], \
-                           [0, fy/z, -v/z]])
-            Js = np.dot(Js, RR)
-            Js_inv = np.linalg.pinv(Js)
+            # # 计算视觉矩阵Js
+            # u = x[0] - u0
+            # v = x[1] - v0
+            # z = 1 # =========================
+            # Js = np.array([[fx/z, 0, -u/z], \
+            #                [0, fy/z, -v/z]])
+            # Js = np.dot(Js, RR)
+            # Js_inv = np.linalg.pinv(Js)
 
             # Js_hat = np.array([[theta_k[0,0]-theta_k[6,0]*x[0,0]+theta_k[9,0], theta_k[1,0]-theta_k[7,0]*x[0,0]+theta_k[10,0], theta_k[2,0]-theta_k[8,0]*x[0,0]+theta_k[11,0]],\
             #                                                 [theta_k[3,0]-theta_k[6,0]*x[1,0]+theta_k[12,0], theta_k[4,0]-theta_k[7,0]*x[1,0]+theta_k[13,0], theta_k[5,0]-theta_k[8,0]*x[1,0]+theta_k[14,0]]])
@@ -380,15 +378,17 @@ def main():
             
 
             # 计算末端速度
-            rdot = np.dot(J,np.reshape(qdot, (7,1)))
+            # rdot = np.dot(J, np.reshape(qdot, [7, 1]))
 
             # 更新目标位置
             # if sub.marker_pose_ready:
             #     r_d = sub.get_rigid_transform()
 
+            rdot = np.dot(J,np.reshape(qdot, (7,1)))
+
             # 计算ut
-            x = np.reshape(x,[2,1])
-            ut = -np.dot( J_pos_inv, np.dot( Js_inv , np.dot(Kp, (x-x_d) ) ) )
+            ut = - np.dot(J_inv, np.dot(Kp, error_format(r,r_d)))
+            # print("error:",np.reshape(error_format(r,r_d),(6,)))
 
             # # 计算un
             # if t - t_ready > 15 and t - t_ready < 16:
@@ -399,18 +399,15 @@ def main():
             
             v = ut 
             v = np.reshape(np.array(v), [-1,])
-
-            # print(v," | ",(x-x_d).tolist())
             
             v[v > 0.10] = 0.10
             v[v < -0.10] = -0.10
             
-            log_x = np.concatenate((log_x,np.reshape(x,(2,1))),axis=1)
-            log_r = np.concatenate((log_r,np.reshape(r, (7,1))), axis=1)
-            log_q = np.concatenate((log_q,np.reshape(q_now, (7,1))), axis=1)
-            log_qdot = np.concatenate((log_qdot,np.reshape(qdot, (7,1))), axis=1)
-            log_dqdot = np.concatenate((log_dqdot,np.reshape(v, (7,1))), axis=1)
-            log_rdot = np.concatenate((log_rdot,np.reshape(rdot, (6,1))), axis=1)
+            log_r = np.concatenate((log_r,np.reshape(r, [7, 1])), axis=1)
+            log_q = np.concatenate((log_q,np.reshape(q_now, [7, 1])), axis=1)
+            log_qdot = np.concatenate((log_qdot,np.reshape(qdot, [7, 1])), axis=1)
+            log_dqdot = np.concatenate((log_dqdot,np.reshape(v, [7, 1])), axis=1)
+            log_rdot = np.concatenate((log_rdot,np.reshape(rdot, [6, 1])), axis=1)
 
             traj_gen_proto_msg = JointPositionVelocitySensorMessage(
                 id=i, timestamp=rospy.Time.now().to_time() - t_ready, 
@@ -427,7 +424,7 @@ def main():
             rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
             pub.publish(ros_msg)
 
-        elif flag_initialized == 2 and t - t_ready > max_execution_time:
+        else:
             # terminate dynamic joint velocity control
             term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - t_ready, should_terminate=True)
             ros_msg = make_sensor_group_msg(
@@ -435,11 +432,6 @@ def main():
                 term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
             )
             pub.publish(ros_msg)
-            fa.goto_gripper(0.02,grasp=True,speed=0.04,force=3,block=True)
-            time.sleep(2)
-            fa.reset_joints(block=True)
-            flag_initialized = 3
-        else:
             break
 
         q_last = q_now
@@ -476,25 +468,24 @@ def main():
     plt.savefig(current_path+ dir+'log_rdot.jpg')
 
     # # vision space position===============================================
-    plt.figure()
-    plt.plot(log_x[0,:], log_x[1,:],label = 'actual')
-    plt.scatter(x_d[0],x_d[1],label = 'target', c='r')
-    plt.legend()
-    plt.title('vision space trajectory')
-    plt.xlabel('x (pixel)')
-    plt.ylabel('y (pixel)')
-    plt.savefig(current_path+ dir+'log_x.jpg')
+    # plt.figure()
+    # plt.plot(log_x_array[:,0], log_x_array[:,1],label = 'actual')
+    # plt.scatter(dx[0],dx[1],label = 'target', c='r')
+    # plt.legend()
+    # plt.title('vision space trajectory')
+    # plt.xlabel('x (pixel)')
+    # plt.ylabel('y (pixel)')
+    # plt.savefig(current_path+ dir+'log_x.jpg')
 
     # # vision space position verse time======================================
-    fig = plt.figure(figsize=(20,8))
-    plt.plot(np.linspace(0,np.shape(log_rdot)[1]/ros_freq,np.shape(log_rdot)[1]), log_x[0,:]-x_d[0],label = 'x')
-    plt.plot(np.linspace(0,np.shape(log_rdot)[1]/ros_freq,np.shape(log_rdot)[1]), log_x[1,:]-x_d[1],label = 'y')
-    plt.legend()
-    # plt.title('vision space error')
-    plt.xlabel('time (s)')
-    plt.ylabel('error (pixel)')
-    # plt.savefig(current_path+ dir+'log_x_t.jpg',bbox_inches='tight',dpi=fig.dpi,pad_inches=0.0)
-    plt.savefig(current_path+ dir+'log_x_t.jpg')
+    # fig = plt.figure(figsize=(20,8))
+    # plt.plot(np.linspace(0,np.shape(log_rdot)[1]/ros_freq,np.shape(log_rdot)[1]), log_x_array[:,0]-dx[0],label = 'x')
+    # plt.plot(np.linspace(0,np.shape(log_rdot)[1]/ros_freq,np.shape(log_rdot)[1]), log_x_array[:,1]-dx[1],label = 'y')
+    # plt.legend()
+    # # plt.title('vision space error')
+    # plt.xlabel('time (s)')
+    # plt.ylabel('error (pixel)')
+    # plt.savefig('log_x_t.jpg',bbox_inches='tight',dpi=fig.dpi,pad_inches=0.0)
 
 
     # joint space velocity=================================================

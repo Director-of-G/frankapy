@@ -46,13 +46,13 @@ def compute_tau_for_franka_interface(tau, expert_traj_len, record_hz, execute_hz
     """
     return tau * (record_hz / execute_hz) * (100 / expert_traj_len)
 
-def reset_arm_with_recorded_traj(traj, reset_time):
+def reset_arm_with_recorded_traj(fa, traj, reset_time):
     assert reset_time > 10
 
     franka_arm_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
     traj_inv = traj[::-1]
     fa.goto_joints(joints=traj_inv[0], duration=reset_time + 1, dynamic=True, buffer_time=10,
-                   joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES)
+                   joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES, ignore_virtual_walls=True)
     init_time = rospy.Time.now().to_time()
     i = 0
 
@@ -128,7 +128,8 @@ if __name__ == '__main__':
     my_goal = copy.deepcopy(q[-1, :])
     my_y0 = copy.deepcopy(q[0, :])
 
-    # my_goal = [-0.05786455, -0.79165032, -0.48915963, -2.29221188, -1.51290995, 2.01605712, -0.98226636]
+    # change goal position in joint space
+    my_goal = [-0.09787809, -1.01912609, -0.71364178, -2.47889868, -2.11014511, 1.54519812, -0.75279362]
 
     # train joint dmp
     dt = 1 / len(q)  # set dt for dmp and cs = (1 / traj_data_points)
@@ -215,13 +216,13 @@ if __name__ == '__main__':
         joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
         fa.goto_joints(joints=joints, block=True)
 
-        fa.open_gripper(block=True)
-        time.sleep(3)
-        fa.goto_gripper(width=0.02, 
-                        grasp=True,
-                        speed=0.04,
-                        force=0.5,
-                        block=True)
+        # fa.open_gripper(block=True)
+        # time.sleep(3)
+        # fa.goto_gripper(width=0.02, 
+        #                 grasp=True,
+        #                 speed=0.04,
+        #                 force=0.5,
+        #                 block=True)
 
         print('Resetting robot to home joints and home gripper!')
 

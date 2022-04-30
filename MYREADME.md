@@ -69,6 +69,23 @@
             * `parse_parameters`,`get_next_step`在基类`TrajectoryGenerator`中被定义为纯虚函数,一定要在派生类中定义
         * 改完franka_interface记得编译。先`make_franka_interface.sh`再`make_catkin.sh`
 
+* **0429**
+    * 代码文件更名：  
+        * `my_Cartesian_vision_based_control.py`：给定Franka EE在Cartesian space的位姿(6DOF), 通过关节速度控制(P控制)到达目标  
+        * `my_vision_based_control.py`：(目前)给定图像平面目标点$x_d$, 通过关节速度控制(P控制)到达目标  
+        * `my_vision_based_control_with_dmp.py`：是`my_vision_based_control.py`加上dmp的版本。根据图像空间的目标位置抓取物体后，reset到home position，执行dmp（其中goal position改过了，和专家轨迹的goal不同）放置物品
+    * 更新了`my_vision_based_control.py`的控制律中需要用到的Jacobi矩阵$J$：  
+        * 在Franka夹爪侧面粘贴ArUco码(Id=99, Size=0.039*0.039m, 注意实验室HP打印机打出来的码比标称值要小), 用于Franka在相机中定位  
+        * 利用ROS的tf机制标定ArUco码相对Franka EE的位姿  
+            1. 在`start_vision_based_control.launch`中添加了`panda_moveit_config panda_control_moveit_rviz.launch`的启动代码。于是, tf中会发布Franka各link以及EE的tf树  
+            2. 在`start_vision_based_control.launch`中添加了发布静态坐标变化的代码，利用`static_transform_publisher`实现。于是, tf中会发布panda_link0 $\rightarrow$ camera_link的坐标变换（即$_{camera\_link}^{panda\_link0}T$,panda_link0到camera_link），即camera的外参  
+            3. 在`./examples/marker_tf_listener.py`中，订阅`/aruco_single/transform`，将其中ArUco码在camera frame中的位姿发布到tf上。并通过`TransformListener`的`lookupTransform`查看ArUco marker到Franka EE的tf变换  
+
+            ***NOTES***  
+            * 在tf中，利用`TransformBroadcaster`和`TransformListener`来发布和订阅tf变换。tf中参数顺序在前的为`parent frame`，在后的为`child frame`。在tf树中，箭头从`parent frame`指向`child frame`，对应的齐次变换矩阵为$_{child\_frame}^{parent\_frame}T$，**容易颠倒，务必注意!!!**  
+            * `start_vision_based_control.launch`中启动panda_moveit_config，不能与frankapy或Franka Interface同时运行，否则Franka Interface会挂起，容易导致死机。猜测Franka Interface底层采用了mutex内存保护机制(*reference:*[Mutex类文档]https://docs.microsoft.com/zh-cn/dotnet/api/system.threading.mutex?view=net-6.0)  
+
+            4. 以上只是得到ArUco marker到Franka EE的tf变换，进一步还需得到joint velocity $\rightarrow$ ArUco marker在Cartesian space速度的Jacobi矩阵
 
 
 ### Warning

@@ -1,12 +1,13 @@
-import imp
 from frankapy import FrankaArm, SensorDataMessageType
 from frankapy import FrankaConstants as FC
 from autolab_core import RigidTransform
 
 import rospy
 import numpy as np
+import pickle
 
 from vision_pose_get import VisionPosition
+from my_run_joint_dmp import my_make_joint_dmp_info, compute_tau_for_franka_interface, reset_arm_with_recorded_traj
 # from hololens_reader import HololensPosition
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PointStamped
@@ -219,6 +220,79 @@ def error_format(r,r_d):
     error = position_error_list + [angle*x,angle*y,angle*z]
     return np.reshape(np.array(error),(6,1))
 
+def execute_joint_dmp(fa):
+    # load trajectory
+    traj_path = './data/0416/traj.pkl'
+    state_dict = pickle.load(open(traj_path, "rb" ) )
+    my_goal = None
+    
+    # get joint trajectory, goal, and initial joint angles
+    q = state_dict[0]["skill_state_dict"]['q']
+    # load dmp weights
+    dmp_weights_path = './data/0416/joint_dmp_weights.pkl'
+    with open(dmp_weights_path, "rb") as pkl_f:
+        joint_dmp_info_dict = pickle.load(pkl_f)
+    mu, h = joint_dmp_info_dict['mu'], joint_dmp_info_dict['h']
+    weights = joint_dmp_info_dict['weights']
+
+    # parameters
+    tau = compute_tau_for_franka_interface(tau=1,
+                                           expert_traj_len=len(q),
+                                           record_hz=10,
+                                           execute_hz=1000)
+    alpha_y = 60.0
+    beta_y = alpha_y / 4
+    alpha_x = 1.0
+    num_basis = 42
+    num_dims = 7
+    run_time = 31.0
+
+    joint_dmp_info = my_make_joint_dmp_info(tau=tau,
+                                            alpha_y=alpha_y,
+                                            beta_y=beta_y,
+                                            num_dims=num_dims,
+                                            num_basis=num_basis,
+                                            alpha_x=alpha_x,
+                                            mu=mu,
+                                            h=h,
+                                            weights=weights
+                                            )
+
+    # change goal
+    my_goal = [-0.09787809, -1.01912609, -0.71364178, -2.47889868, -2.11014511, 1.54519812, -0.75279362]
+
+    # execute dmp
+    joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
+    fa.goto_joints(joints=joints, block=True)
+
+    joints_memory = []
+    print('Resetting robot to home joints and home gripper!')
+    fa.execute_joint_dmp(joint_dmp_info=joint_dmp_info, 
+                         duration=run_time, 
+                         use_impedance=True,
+                         k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
+                         d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 10.0],
+                         initial_sensor_values=my_goal if isinstance(my_goal, list) else my_goal.reshape(-1).tolist(),
+                         block=False)
+
+    timer = rospy.Rate(50)
+    start_time = time.time()
+    while True:
+        end_time = time.time()
+        if (end_time - start_time) >= run_time:
+            break
+        joints_memory.append(fa.get_joints().tolist())
+        timer.sleep()
+
+    print('The robot has reached the goal!')
+
+    fa.open_gripper()
+
+    time.sleep(3)
+
+    reset_arm_with_recorded_traj(fa, copy.deepcopy(joints_memory), reset_time=run_time)
+
+    print('The robot stopped!')
 
 def main():
     dir = '/my_vision_based_control/0429/'
@@ -275,7 +349,7 @@ def main():
     Kp = 0.5 * np.eye(2)#TODO
     Cd = np.eye(7)#TODO
 
-    time.sleep(0.3)# wait for a short time otherwise q_last is empty
+    time.sleep(0.6)# wait for a short time otherwise q_last is empty
     q_last = fa.get_joints()
     x_last1 = vision_reader.pos1
     x_last2 = vision_reader.pos2
@@ -299,7 +373,7 @@ def main():
             continue
         x_now = vision_reader.pos1
         x_d = np.reshape(vision_reader.pos2, [2, 1])
-        x_d = x_d-np.array([[340],[154]])
+        x_d = x_d-np.array([[340],[124]])
         x = x_now
         k_now = vision_reader.k_pos
         r_now = pose_format(fa.get_pose())
@@ -454,6 +528,11 @@ def main():
     # print(np.shape(log_qdot))
     # log_x_array = np.array(log_x)
 
+    """
+        Execute joint dmp with recorded trajectory
+    """
+    execute_joint_dmp(fa)
+
     np.save(current_path+ dir+'log_r.npy',log_r)
     np.save(current_path+ dir+'log_q.npy',log_q)
     np.save(current_path+dir+'log_qdot.npy',log_qdot)
@@ -533,6 +612,7 @@ def test():
 
 if __name__ == '__main__':
     main()
+
 
     # nh_ = rospy.init_node('vision_based_control_node', anonymous=True)
     # test()

@@ -1847,7 +1847,7 @@ class FrankaArm:
         -------
             transforms : :obj:`list` 
                 A list of 9 RigidTransforms or ndarrays in panda_link0 to panda_link7, 
-                the franka_tool_base, and franka_tool frames.
+                the np.repeat(np.expand_dims(np.eye(4), 0), len(FC.DH_PARAMS) + 3, axis=0), and franka_tool frames.
             
         """
         transforms_matrices = np.repeat(np.expand_dims(np.eye(4), 0), len(FC.DH_PARAMS) + 3, axis=0)
@@ -1904,6 +1904,79 @@ class FrankaArm:
             return rigid_transforms
         else:
             return transforms_matrices
+
+    """
+    modified by IRM lab
+    Date: 2022/04/29
+    """
+    def get_marker_links_transforms(self, joints):
+        """ 
+        Computes the forward kinematics of all links and the aruco marker
+
+        Parameters
+        ----------
+            joints : :obj:`list` 
+                A list of 7 numbers that correspond to to the joint angles in radians
+            use_rigid_transforms : :obj:`bool`  
+                Optional: Defaults to False.
+                If True, converts result to RigidTransform objects. This is slower.
+
+        Returns
+        -------
+            transforms : :obj:`list` 
+                A list of 9 RigidTransforms or ndarrays in panda_link0 to panda_link7, 
+                the np.repeat(np.expand_dims(np.eye(4), 0), len(FC.DH_PARAMS) + 3, axis=0), and aruco marker frames.
+            
+        """
+
+        transforms_matrices = np.repeat(np.expand_dims(np.eye(4), 0), len(FC.DH_PARAMS) + 2, axis=0)
+        prev_transform = np.eye(4)
+        my_DH_PARAMS = np.concatenate((FC.DH_PARAMS, np.array([[0.101, 0.052, np.pi, -np.arctan(76/67)]]).reshape(1, 4)), axis=0)
+        # my_DH_PARAMS[-2, -1] = np.arctan(67/76)
+        # print(my_DH_PARAMS)
+
+        for i in range(len(my_DH_PARAMS)):
+            a, d, alpha, theta = my_DH_PARAMS[i]
+
+            if i < FC.N_REV_JOINTS:
+                theta = theta + joints[i]
+
+            ca, sa = np.cos(alpha), np.sin(alpha)
+            ct, st = np.cos(theta), np.sin(theta)
+            self._dh_alpha_rot[1, 1] = ca
+            self._dh_alpha_rot[1, 2] = -sa
+            self._dh_alpha_rot[2, 1] = sa
+            self._dh_alpha_rot[2, 2] = ca
+
+            self._dh_a_trans[0, 3] = a
+            self._dh_d_trans[2, 3] = d
+
+            self._dh_theta_rot[0, 0] = ct
+            self._dh_theta_rot[0, 1] = -st
+            self._dh_theta_rot[1, 0] = st
+            self._dh_theta_rot[1, 1] = ct
+
+            delta_transform_matrix = self._dh_alpha_rot @ self._dh_a_trans @ self._dh_d_trans @ self._dh_theta_rot
+
+            transforms_matrices[i + 1] = prev_transform @ delta_transform_matrix
+            prev_transform = transforms_matrices[i + 1]
+
+        return transforms_matrices
+
+    """
+    modified by IRM lab
+    Date: 2022/04/29
+    """
+    def get_marker_link_jacobian(self, joints):
+        transforms = self.get_marker_links_transforms(joints)
+
+        joints_pos = transforms[1:FC.N_REV_JOINTS + 1, :3, 3]
+        ee_pos = transforms[-1, :3, 3]
+        axes = transforms[1:FC.N_REV_JOINTS + 1, :3, 2]
+
+        J = np.r_[np.cross(axes, ee_pos - joints_pos).T, axes.T]
+
+        return J
 
     def get_jacobian(self, joints):
         """ 
