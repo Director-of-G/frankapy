@@ -103,8 +103,9 @@ class MarkerPoseSubscriber(object):
                                                      from_frame='franka_tool', \
                                                      to_frame='aruco_marker')
 
-        self.camera_extrinsics = CameraExtrinsics(translation=[0.12814754119886385, 0.6123173, 0.7802863754115138], \
-                                                  quaternion=[0.01559084415106623, -0.00028621403739803597, 0.9998618117382161, -0.0057620385068332175])
+        # the data was calibrated on 0430, after the camera position was higher
+        self.camera_extrinsics = CameraExtrinsics(translation=[0.10854596161538782,0.5895254013581694,1.3748040178378818], \
+                                                  quaternion=[0.026593157042844106,-0.006128866589368008,0.9995994598686369,0.00749405251881394])
 
         self.marker_pose_ready = False  # whether the marker pose has been stabalized or not
 

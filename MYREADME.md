@@ -78,7 +78,7 @@
         * 在Franka夹爪侧面粘贴ArUco码(Id=99, Size=0.039*0.039m, 注意实验室HP打印机打出来的码比标称值要小), 用于Franka在相机中定位  
         * 利用ROS的tf机制标定ArUco码相对Franka EE的位姿  
             1. 在`start_vision_based_control.launch`中添加了`panda_moveit_config panda_control_moveit_rviz.launch`的启动代码。于是, tf中会发布Franka各link以及EE的tf树  
-            2. 在`start_vision_based_control.launch`中添加了发布静态坐标变化的代码，利用`static_transform_publisher`实现。于是, tf中会发布panda_link0 $\rightarrow$ camera_link的坐标变换（即$_{camera\_link}^{panda\_link0}T$,panda_link0到camera_link），即camera的外参  
+            2. 在`start_vision_based_control.launch`中添加了发布静态坐标变化的代码，利用`static_transform_publisher`实现。于是, tf中会发布panda_link0 $\rightarrow$ camera_link的坐标变换（即$_{camera\_link}^{panda\_link0}T$,也就是我们平时说的camera_link到panda_link0，注意tf的顺序是反的），即camera的外参  
             3. 在`./examples/marker_tf_listener.py`中，订阅`/aruco_single/transform`，将其中ArUco码在camera frame中的位姿发布到tf上。并通过`TransformListener`的`lookupTransform`查看ArUco marker到Franka EE的tf变换  
 
             ***NOTES***  

@@ -11,8 +11,9 @@
     <node pkg="tf2_ros" type="static_transform_publisher" name="to_publish_a_camera_link_frame" 
         args="0 0 0 0 0 0 1  camera_link camera_color_frame" />
 
+    <!-- publish camera_link, the data was calibrated on 0430 -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="to_publish_a_aruco_marker_frame" 
-        args="0.12 0.6108177706978624 0.7797042704589798 0 1 0 0  panda_link0 camera_link" />
+        args="0.10854596161538782 0.5895254013581694 1.3748040178378818 -0.006128866589368008 0.9995994598686369 0.00749405251881394 0.026593157042844106 panda_link0 camera_link" />
 
     <!-- publish marker_ee_frame -->
     <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="to_publish_marker_on_ee_frame" 
