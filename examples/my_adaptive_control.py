@@ -73,28 +73,68 @@ class RegionFunction(object):
             return - self.Kv * self.fv(x) * partial_fv
 
     class CartesianSpaceRegionFunction(object):
-        def __init__(self, r_c, c, Kc) -> None:
+        def __init__(self, r_c=None, c=None, Kc=None) -> None:
+            """
+                r_c is the desired Cartesian configuration, which is [x, y, z, r, p, y].
+                r∈[-pi, pi], p∈[-pi/2, pi/2], y∈[-pi, pi], which is euler angle in the order of 'XYZ'
+            """
             self.r_c = r_c
             self.c = c
             self.Kc = Kc
+
         def set_r_c(self, r_c):
             self.r_c = r_c
+
+        def set_r_c_with_pose(self, pose):
+            """
+                Given the pose in Cartesian space, which is a RigidTransform(translation, rotation).
+                Calculate the corresponding r_c, which is [x, y, z, r, p, y].
+                Avoid assigning y too close to pi/2 and -pi/2
+            """
+            x, y, z = pose.translation
+            r, p, y = R.from_matrix(pose.rotation).as_euler(seq='XYZ', degrees=False)
+            r_c = np.array([x, y, z, r, p, y])
+            self.set_r_c(r_c)
+
         def set_c(self, c):
             self.c = c
+            
         def set_Kc(self, Kc):
             self.Kc = Kc
+
         def fc(self, r):
-            return ((r - self.r_c) / self.c) ** 2 - 1
+            """
+                r should have the size of (6,)
+            """
+            r, r_c, c = r.reshape(6, 1), self.r_c.reshape(6, 1), self.c.reshape(6, 1)
+            roll, yaw = r[3], r[5]
+            if abs(roll - r_c[3]) > np.pi:
+                roll = 2 * r_c[3] - roll
+            if abs(yaw - r_c[5]) > np.pi:
+                yaw = 2 * r_c[5] - yaw
+            r[3], r[5] = roll, yaw
+            fc = ((r - r_c) / c) ** 2 - 1
+            return fc
+
         def in_region(self, r):
             fc = self.fc(r)
-            return np.all(fc <= 0)
+            return (fc <= 0).reshape(6, 1)
+
         def Pc(self, r):
             fc = self.fc(r)
             return np.sum(0.5 * self.Kc * np.max(0, fc) ** 2)
+
         def kesi_r(self, r):
-            partial_fc = 2 * (r - self.r_c) / (self.c ** 2)
+            r, r_c, c = r.reshape(6, 1), self.r_c.reshape(6, 1), self.c.reshape(6, 1)
+            roll, yaw = r[3], r[5]
+            if abs(roll - r_c[3]) > np.pi:
+                roll = 2 * r_c[3] - roll
+            if abs(yaw - r_c[5]) > np.pi:
+                yaw = 2 * r_c[5] - yaw
+            r[3], r[5] = roll, yaw
+            partial_fc = 2 * (r - r_c) / (c ** 2)
             partial_fc = partial_fc.reshape(-1, 1)
-            return self.Kc * np.max(0, self.fc(r)).reshape(-1, 1) * partial_fc
+            return self.Kc * np.max(0, self.fc(r)) * partial_fc
 
     class JointSpaceRegionFunction(object):
         # @TODO
