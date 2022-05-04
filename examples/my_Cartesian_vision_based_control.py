@@ -184,7 +184,7 @@ class MarkerPoseSubscriber(object):
             
 def pose_format(pose_data):
     """
-    return: 7x1
+    return: 7x1 where quat order is wxyz
     """
     a = np.concatenate((pose_data.translation, pose_data.quaternion),axis=0)
     # print(a)

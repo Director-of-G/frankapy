@@ -2002,6 +2002,30 @@ class FrankaArm:
 
         return J
 
+    def get_jacobian_joint4(self, joints):
+        """ 
+        Computes the analytical jacobian
+        
+        Parameters
+        ----------
+            joints : :obj:`list` 
+                A list of 7 numbers that correspond to the joint angles in radians.
+
+        Returns
+        -------
+            jacobian : :obj:`numpy.ndarray`
+                A 6 by 7 jacobian matrix.
+        """
+        transforms = self.get_links_transforms(joints, use_rigid_transforms=False)
+
+        joints_pos = transforms[1:4, :3, 3]
+        ee_pos = transforms[4, :3, 3]
+        axes = transforms[1:4, :3, 2]
+
+        J = np.r_[np.cross(axes, ee_pos - joints_pos).T, axes.T]
+
+        return J
+
     def get_collision_boxes_poses(self, joints=None, use_rigid_transforms=False):
         """ 
         Computes the transforms of all collision boxes in world frame.

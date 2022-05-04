@@ -6,7 +6,7 @@ from autolab_core import RigidTransform
 import rospy
 import numpy as np
 
-from vision_pose_get import VisionPosition
+from examples.my_vision_pose_get import VisionPosition
 # from hololens_reader import HololensPosition
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PointStamped

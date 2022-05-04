@@ -6,7 +6,7 @@ import rospy
 import numpy as np
 import pickle
 
-from vision_pose_get import VisionPosition
+from examples.my_vision_pose_get import VisionPosition
 from my_run_joint_dmp import my_make_joint_dmp_info, compute_tau_for_franka_interface, reset_arm_with_recorded_traj
 # from hololens_reader import HololensPosition
 from sensor_msgs.msg import JointState

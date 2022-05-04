@@ -1,30 +1,30 @@
 from gettext import translation
-from re import T
-from turtle import position, speed
+
 import rospy
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point,PointStamped
 from std_msgs.msg import Int8MultiArray
 from autolab_core import RigidTransform
 import argparse
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 from pyquaternion import Quaternion
 import time
 import copy
 
 from frankapy import FrankaArm, SensorDataMessageType
 from frankapy import FrankaConstants as FC
-from frankapy.proto import PosePositionSensorMessage, ShouldTerminateSensorMessage, CartesianImpedanceSensorMessage
+from frankapy.proto import JointPositionVelocitySensorMessage, ShouldTerminateSensorMessage, CartesianImpedanceSensorMessage
 from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
 from franka_interface_msgs.msg import SensorDataGroup
 
 from frankapy.utils import convert_rigid_transform_to_array
 import pickle as pkl
 
+import math
+from transformations import quaternion_from_matrix
+from examples.my_hololens_reader import HololensPosition
+
 FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0503"
-TRANS_LIMIT = 0.02
-QUAT_LIMIT = 0.02
 
 def start_franka_arm():
     fa = FrankaArm()
@@ -55,38 +55,45 @@ def create_formated_skill_dict(joints, end_effector_positions, time_since_skill_
     formatted_dict = {0: skill_dict}
     return formatted_dict
 
-def restrict_cartesian_velocity(translation_d, quat_d):
-    translation_d = copy.deepcopy(translation_d)
-    quat_d = copy.deepcopy(quat_d)
-    current_pose = copy.deepcopy(fa.get_pose())
-    translation = copy.deepcopy(current_pose.translation)
-    quat = copy.deepcopy(current_pose.quaternion)
 
-    for i in range(len(translation_d)):
-        if translation_d[i] >= translation[i] + TRANS_LIMIT:
-            translation_d[i] = translation[i] + TRANS_LIMIT
-        elif translation_d[i] <= translation[i] - TRANS_LIMIT:
-            translation_d[i] = translation[i] - TRANS_LIMIT
-    
-    for j in range(len(quat_d)):
-        if quat_d[j] >= quat[j] + QUAT_LIMIT:
-            quat_d[j] = quat[j] + QUAT_LIMIT
-        elif quat_d[j] <= quat[j] - QUAT_LIMIT:
-            quat_d[j] = quat[j] - QUAT_LIMIT
+def pose_format(pose_data):
+    """
+    return: 7x1
+    """
+    a = np.concatenate((pose_data.translation, pose_data.quaternion),axis=0)
+    # print(a)
+    return np.reshape(a,(7,1))
 
-    return translation_d, quat_d
+def error_format(r,r_d):
+    """
+    input: r,r_d 7x1 array; return:error=r-r_d 6x1 array
+    """
+    position_error_list = list(r[:3,0]-r_d[:3,0])
+    orientation_d=Quaternion(r_d[3:,0])
+    orientation = Quaternion(r[3:,0])
+
+    if (np.dot(r_d[3:,0],r[3:,0]) < 0.0):
+        orientation = -orientation
+
+    error_quaternion = orientation * orientation_d.conjugate
+
+    qw = error_quaternion[0]
+    qx = error_quaternion[1]
+    qy = error_quaternion[2]
+    qz = error_quaternion[3]
+
+    angle = 2 * math.acos(qw)
+    x = qx / math.sqrt(1-qw*qw)
+    y = qy / math.sqrt(1-qw*qw)
+    z = qz / math.sqrt(1-qw*qw)
+
+    error = position_error_list + [angle*x,angle*y,angle*z]
+    return np.reshape(np.array(error),(6,1))
 
 class haptic_subscrbe_handler(object):
     def __init__(self, args: argparse.Namespace, franka_arm: FrankaArm) -> None:
         self.franka_arm = franka_arm
         self.franka_arm_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
-        self.haptic_pos_sub = rospy.Subscriber(name='/haptic/position',
-                                               data_class=Point,
-                                               callback=self.haptic_position_callback)
-        self.haptic_but_sub = rospy.Subscriber(name='/haptic/button_state',
-                                               data_class=Int8MultiArray,
-                                               queue_size=1,
-                                               callback=self.haptic_button_callback)
 
         self.position_ee_d = [0.0, 0.0, 0.0]  # desired end effector position in cartesion space
         self.rotation_ee_d = np.identity(3)
@@ -111,33 +118,43 @@ class haptic_subscrbe_handler(object):
         self.record_rate = args.record_rate  # trajectory recording rate
         self.save_traj = args.save_traj
 
+        self.Kp = np.eye(6)#TODO
+        self.Cd = 5*np.eye(7)#TODO
+
         self.get_franka_initial_state()
         self.initialize_controller()
 
+        self.haptic_pos_sub = rospy.Subscriber(name='/haptic/position',
+                                               data_class=Point,
+                                               callback=self.haptic_position_callback)# this subscriber must be after getting initial state so that position_ee_0 is not none
+        self.haptic_but_sub = rospy.Subscriber(name='/haptic/button_state',
+                                               data_class=Int8MultiArray,
+                                               queue_size=1,
+                                               callback=self.haptic_button_callback)
     def get_franka_initial_state(self):
         pose = self.franka_arm.get_pose()
         self.pose_ee_0 = copy.deepcopy(pose)
         self.position_ee_0 = pose.translation
         self.orientation_ee_0 = pose.rotation
         self.T_ee_world = copy.deepcopy(self.franka_arm.get_pose())
+        # print('self.pose_ee_0',self.pose_ee_0.matrix)
+        self.r_d = np.reshape(np.concatenate((self.position_ee_0,quaternion_from_matrix(self.pose_ee_0.matrix)),axis=0),(7,1))
 
     def initialize_controller(self):
-        self.franka_arm.goto_pose(self.pose_ee_0, duration=self.record_time, dynamic=True, buffer_time=10,
-                                  cartesian_impedances=FC.DEFAULT_CARTESIAN_IMPEDANCES, ignore_virtual_walls=True)
+        self.home_joints = self.franka_arm.get_joints()
+        self.franka_arm.dynamic_joint_velocity(joints=self.home_joints,
+                                joints_vel=np.zeros((7,)),
+                                duration=self.record_time,
+                                buffer_time=10,
+                                block=False)
+        
         self.init_time = rospy.Time.now().to_time()
 
     def haptic_position_callback(self, msg):
         position_received = self.haptic_position_scale * np.array([msg.x, msg.y, msg.z])
         self.position_ee_d = position_received.tolist()
         assert len(self.position_ee_d) == 3
-        # assert len(self.position_ee_d) == 3 and np.all(np.abs(position_received) <= self.y_max_half_width)
-        # print('[x, y, z] from Omega3: ', self.position_ee_d)
 
-        """
-            linearly mapping translation_y to rotation angle around the y-axis
-            angle(y >= width_y) = angle_y
-            angle(y <= -width_y) = -angle_y
-        """
         rot_ang = (msg.y / 0.1) * self.max_rotation_y
         if rot_ang >= self.max_rotation_y:
             rot_ang = self.max_rotation_y
@@ -149,7 +166,22 @@ class haptic_subscrbe_handler(object):
             from_frame='franka_tool', to_frame='franka_tool'
         )
 
-        self.rotation_ee_d = np.matmul(self.T_ee_world.rotation, T_ee_rot.rotation)
+        # self.rotation_ee_d = np.matmul(self.T_ee_world.rotation, T_ee_rot.rotation)
+        # rot = R.from_matrix(copy.deepcopy(self.rotation_ee_d))
+        # quat = rot.as_quat()[[3, 0, 1, 2]]  # the quaternion is [x, y, z, w] in scipy and [w, x, y, z] in RigidTransform!
+        # # print('quat',quat)
+        self.rotation_ee_d = np.matmul(self.T_ee_world.matrix, T_ee_rot.matrix)
+        try:
+            self.r_d = np.concatenate((self.position_ee_d+\
+                self.position_ee_0, 
+            quaternion_from_matrix(self.rotation_ee_d)),axis=0)
+            self.r_d = np.reshape(self.r_d, (7,1))
+        except:
+            print("self.position_ee_d",self.position_ee_d)
+            print("self.position_ee_0",self.position_ee_0)
+            print("self.rotation_ee_d",self.rotation_ee_d)
+        
+        # print('self.r_d',self.r_d)
 
     def haptic_button_callback(self, msg):
         # avoid shivering
@@ -192,98 +224,149 @@ class haptic_subscrbe_handler(object):
         joints = []
         time_since_skill_started = []
 
+        hololens_reader = HololensPosition()
+        holo_sub = rospy.Subscriber("HololensJointManipulation", PointStamped, hololens_reader.callback2)
+
         rospy.loginfo("You can start moving omega 3 now!")
         start_time = time.time()
 
-        send_translation, send_quat = [], []
+        desired_translation, desired_quat = [], []
         real_translation, real_quat = [], []
+        send_v = []
+        send_t = []
+
+        i = 0
+# ================================
         while not rospy.is_shutdown():
-            # print(self.command_idx)
-            if time.time() - start_time >= self.record_time:
+            # rospy.loginfo("start while-----")
+            t = time.time()
+            if t - start_time >= self.record_time:
                 break
 
             # record trajectory
-            pose_array = convert_rigid_transform_to_array(fa.get_pose())
+            pose_array = convert_rigid_transform_to_array(self.franka_arm.get_pose())
             end_effector_position.append(pose_array)
-            joints.append(fa.get_joints())
+            joints.append(self.franka_arm.get_joints())
             time_since_skill_started.append(time.time() - start_time)
 
-
             translation = copy.deepcopy(self.pose_ee_0).translation + np.array(copy.deepcopy(self.position_ee_d))
-            # pose_ee_delta = RigidTransform(rotation=np.ones((3, 3)), translation=self.position_ee_d, from_frame='franka_tool', to_frame='franka_tool')
-            # pose_ee_current = self.pose_ee_0 * pose_ee_delta
             timestamp = rospy.Time.now().to_time() - self.init_time
-            
-            rot = R.from_matrix(copy.deepcopy(self.rotation_ee_d))
-            quat = rot.as_quat()[[3, 0, 1, 2]]  # the quaternion is [x, y, z, w] in scipy and [w, x, y, z] in RigidTransform!
 
-            # print('position: ', translation)
-            # print('quaternion: ', quat)
-            # print('T_ee_world', self.T_ee_world)
-            # print('rotation_ee_d: ', self.rotation_ee_d)
-            # print('quaternion_0: ', R.from_matrix(self.pose_ee_0.rotation).as_quat()[[3, 0, 1, 2]])
-            # print('rot_desired', rot.as_matrix())
-            # print('rot_ee_0', self.pose_ee_0.rotation)
-            real_pose = fa.get_pose()
+            quat = quaternion_from_matrix(self.rotation_ee_d)  # the quaternion is [x, y, z, w] in scipy and [w, x, y, z] in RigidTransform!
+
+            real_pose = self.franka_arm.get_pose()
             real_translation.append(real_pose.translation)
             real_quat.append(real_pose.quaternion)
 
-            translation, quat = restrict_cartesian_velocity(translation, quat)
+            desired_translation.append(translation)
+            desired_quat.append(quat)
 
-            send_translation.append(translation)
-            send_quat.append(quat)
+            q_now = self.franka_arm.get_joints()
+            r = pose_format(self.franka_arm.get_pose())
+            J = self.franka_arm.get_jacobian(q_now)  # (6, 7)
+            J_inv = np.linalg.pinv(J)  # (7, 6)
+            N = np.eye(7) - np.dot(J_inv, J)
+
+#===============================================
+            # joint4pos_my = hololens_reader.joint4pos
+            # J_hololens = self.franka_arm.get_jacobian_joint4(q_now)
+            # J_hololens_3d = J_hololens[:3,:]
+            # d1_3_dimension = np.dot(np.linalg.pinv(J_hololens_3d),joint4pos_my.reshape([3,1]))
+            # d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
+            # d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
+#===============================================
+
+            # calculate the velocity ut
+            ut = - np.dot(J_inv, np.dot(self.Kp, error_format(r,self.r_d)))
+            # 计算un
+#===============================================这两段放出来角度就出错
+            # un = -np.dot(N, np.dot(np.linalg.inv(self.Cd), d))
+#===============================================
+            if t - start_time > 5 and t - start_time < 7:
+                # d = -np.reshape(np.array([-0.2, -0.2, 0.2, 0.2, 0.2, 0.1, 0.1], float), (7, 1))
+                joint4pos_my = np.array([0,0.2,0])
+                J_hololens = self.franka_arm.get_jacobian_joint4(q_now)
+                J_hololens_3d = J_hololens[:3,:]
+                d1_3_dimension = np.dot(np.linalg.pinv(J_hololens_3d),joint4pos_my.reshape((3,1)))
+                d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
+                d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
+                d = np.reshape(d,(7,1))
+                print('d',d)
+
+                un = N @ np.linalg.inv(self.Cd) @ d
+                print('un',un)
+                # pass 
+            else:
+                un = np.zeros((7,1))
+
+            v = ut+un
+            v = np.reshape(np.array(v), [-1,])
             
-            traj_gen_proto_msg = PosePositionSensorMessage(
-                id=self.command_idx, timestamp=timestamp, 
-                position=translation, quaternion=quat
-            )
-            fb_ctrlr_proto = CartesianImpedanceSensorMessage(
-                id=self.command_idx, timestamp=timestamp,
-                translational_stiffnesses=FC.DEFAULT_TRANSLATIONAL_STIFFNESSES,
-                rotational_stiffnesses=FC.DEFAULT_ROTATIONAL_STIFFNESSES
+            v[v > 0.30] = 0.30
+            v[v < -0.30] = -0.30
+
+            send_v.append(v)
+            send_t.append(t)
+
+            traj_gen_proto_msg = JointPositionVelocitySensorMessage(
+                id=i, timestamp=timestamp, 
+                seg_run_time=30.0,
+                joints=self.home_joints,
+                joint_vels=v.tolist()
             )
             ros_msg = make_sensor_group_msg(
                 trajectory_generator_sensor_msg=sensor_proto2ros_msg(
-                    traj_gen_proto_msg, SensorDataMessageType.POSE_POSITION),
-                feedback_controller_sensor_msg=sensor_proto2ros_msg(
-                    fb_ctrlr_proto, SensorDataMessageType.CARTESIAN_IMPEDANCE)
-                )
-
-            rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+                    traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION_VELOCITY)
+            )
+            
+            i += 1
+            rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.timestamp))
             self.franka_arm_pub.publish(ros_msg)
 
-            self.command_idx += 1
-            
             rate.sleep()
 
-
-        term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - self.init_time, should_terminate=True)
+        term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - start_time, should_terminate=True)
         ros_msg = make_sensor_group_msg(
-            termination_handler_sensor_msg=sensor_proto2ros_msg(
-                term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
-            )
+        termination_handler_sensor_msg=sensor_proto2ros_msg(
+            term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
+        )
         self.franka_arm_pub.publish(ros_msg)
+
+        self.franka_arm.goto_gripper(0.02,grasp=True,speed=0.04,force=3,block=True)
+        time.sleep(2)
+        self.franka_arm.reset_joints(block=True)
+
         rospy.loginfo('Done')
 
         from matplotlib import pyplot as plt
-        send_translation_diff = np.array(send_translation)[1:] - np.array(send_translation)[:-1]
-        send_quat_diff = np.array(send_quat)[1:] - np.array(send_quat)[:-1]
+        desired_translation_diff = np.array(desired_translation)[1:] - np.array(desired_translation)[:-1]
+        desired_quat_diff = np.array(desired_quat)[1:] - np.array(desired_quat)[:-1]
         plt.figure(2)
-        plt.plot(real_translation)
-        plt.plot(send_translation)
+        labels = ['x','y','z']
+        lines = plt.plot(send_t,real_translation)
+        plt.legend(lines, labels)
+        plt.plot(send_t,desired_translation)
+        plt.title("real_translation and desired_translation")
         plt.show()
         plt.figure(3)
         plt.plot(real_quat)
-        plt.plot(send_quat)
+        plt.plot(desired_quat)
         plt.show()
         plt.figure(4)
-        plt.plot(send_translation_diff.tolist())
+        plt.plot(desired_translation_diff.tolist())
         plt.show()
         plt.figure(5)
-        plt.plot(send_quat_diff.tolist())
+        plt.plot(desired_quat_diff.tolist())
         plt.show()
-        print(send_translation_diff.shape)
-        print(send_quat_diff.shape)
+        plt.figure(6)
+        # labels = [1,2,3,4,5,6,7]
+        # for y,label in zip(send_v,labels):
+        #     plt.plot(y,label = label)
+        plt.plot(send_v,label = ['1','2','3','4','5','6','7'])
+        plt.legend()
+        plt.show()
+        print(desired_translation_diff.shape)
+        print(desired_quat_diff.shape)
 
         # save trajectory
         if self.save_traj:
@@ -291,6 +374,8 @@ class haptic_subscrbe_handler(object):
             with open(FILE_NAME + '/traj.pkl', 'wb') as pkl_f:
                 pkl.dump(skill_dict, pkl_f)
                 print("Did save skill dict: {}".format(FILE_NAME + '/traj.pkl'))
+        
+        exit()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -302,7 +387,7 @@ if __name__ == '__main__':
                         help='The maximum angle that end effector can rotate around the y axis.')
     parser.add_argument('--haptic_scale', '-hs', type=str, default=6,  # 4
                         help='The moving distance ratio of Franka end effector and haptic.')
-    parser.add_argument('--record_time', '-rt', type=str, default=30,
+    parser.add_argument('--record_time', '-rt', type=str, default=10,
                         help='Time length of the trajectory teaching.')
     parser.add_argument('--record_rate', '-rr', type=str, default=10,
                         help='Frequency of trajectory recording.')

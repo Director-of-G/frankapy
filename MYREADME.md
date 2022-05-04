@@ -12,7 +12,8 @@
             | :----: | :----: | :----: |
             | FILE_NAME | line 24 | trajectory save path |  
            Modify other parameters in `my_haptic_subscriber.py`, including `width_y`, `angle_y`, `haptic_scale`, `record_time` and `record_rate`
-        2. Start Franka, Omega3 and controll PC(run the bash scripts in frankapy)
+        2. Start Franka, Omega 3 and controll PC(run the bash scripts in frankapy)
+            * starting Omega 3: first `cd /dev/bus/usb/001`; second `lsusb` to find the file corresponding to Omega 3, let's say `005`; third `sudo chmod 777 005`; last `rosrun haptic_ros_driver haptic_ros_driver`.
         3. run
             ```python
                 python ./examples/my_haptic_subscriber.py
@@ -86,7 +87,21 @@
             * `start_vision_based_control.launch`中启动panda_moveit_config，不能与frankapy或Franka Interface同时运行，否则Franka Interface会挂起，容易导致死机。猜测Franka Interface底层采用了mutex内存保护机制(*reference:*[Mutex类文档]https://docs.microsoft.com/zh-cn/dotnet/api/system.threading.mutex?view=net-6.0)  
 
             4. 以上只是得到ArUco marker到Franka EE的tf变换，进一步还需得到joint velocity $\rightarrow$ ArUco marker在Cartesian space速度的Jacobi矩阵
-
+* **0503**
+    * 完成了`my_haptic_subscriber_hololens.py`. 
+        * 基本思路是从`my_haptic_subscriber.py`开始改，把里面的笛卡尔空间阻抗控制器换成关节空间速度控制器。原先需要的proto_msg有`PosePositionSensorMessage`和`CartesianImpedanceSensorMessage`，相当于笛卡尔空间阻抗控制器的参数通过`CartesianImpedanceSensorMessage`传到底层franka_interface去计算。现在控制器全部在上层写了，需要的proto_msg只有`JointPositionVelocitySensorMessage`一个.
+        * 在`FrankaArm`中添加了`get_jacobian_joint4()`用于将hololens的输入转化成`d`
+        * 参数有`Kp`和`Cd`，现在都是单位阵，速度限制设为0.3。这些参数都是调过的，基本够用。
+        * 使用前，先更改`record_time`
+        * 注意：如果发现Nullspace导致实际末端位姿有变化，很有可能是速度限幅将某几个关节限制了。
+    * 完成了和hololens的联调
+        ```
+        bash bash_scripts/start_control_pc.sh -i localhost
+        roslaunch ros_tcp_endpoint endpoint.launch
+        rosrun haptic_ros_driver haptic_ros_driver
+        # activate virtual environment and source
+        python ./examples/my_haptic_subscriber_hololens.py
+        ```
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
