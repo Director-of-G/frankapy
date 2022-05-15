@@ -2,10 +2,6 @@
     my_adaptive_control.py, 2022-05-01
     Copyright 2022 IRM Lab. All rights reserved.
 """
-from tkinter import N, W
-from tkinter.tix import Tree
-
-from matplotlib.pyplot import axis
 from frankapy.franka_arm import FrankaArm
 import rospy
 import tf
@@ -15,6 +11,7 @@ import numpy as np
 import math
 
 from my_utils import Quat, RadialBF
+import pdb
 
 # Definition of Constants
 class MyConstants(object):
@@ -225,7 +222,7 @@ class JointSpaceRegion(object):
         self.single_qrbound = np.concatenate((self.single_qrbound, [[qrbound]]), axis=1)
         self.single_inout = np.concatenate((self.single_inout, [[int(inner) * 2 - 1]]), axis=1)
 
-    def add_region_multi(self, qc, qbound, qrbound, mask, kq=np.ones((7, 1)), kr=np.ones((7, 1)), inner=False, scale=np.ones((7, 1))):
+    def add_region_multi(self, qc, qbound, qrbound, mask, kq=1, kr=1, inner=False, scale=np.ones((7, 1))):
         self.multi_kq = np.concatenate((self.multi_kq, [[kq]]), axis=1)
         self.multi_kr = np.concatenate((self.multi_kr, [[kr]]), axis=1)
         self.multi_qc = np.concatenate((self.multi_qc, qc.reshape(7, 1)), axis=1)
@@ -238,8 +235,8 @@ class JointSpaceRegion(object):
     def fq(self, q):
         n_single, n_multi = self.single_qc.shape[1], self.multi_qc.shape[1]  # (1, n_single) and (7, n_multi)
 
-        q = q.reshape(7,)
-        q_scale_single = (q[self.single_mask] * self.single_scale)  # (1, n_single)
+        q = q.reshape(1, 7)
+        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
         fq_single = (q_scale_single - self.single_qc) ** 2 - self.single_qbound ** 2  # (1, n_single)
         fqr_single = (q_scale_single - self.single_qc) ** 2 - self.single_qrbound ** 2  # (1, n_single)
         fq_single = fq_single * self.single_inout  # (1, n_single)
@@ -263,17 +260,17 @@ class JointSpaceRegion(object):
     def Ps(self, q):
         fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
         Ps = 0
-        Ps = Ps + np.sum(0.5 * self.single_kq * (np.min(0, fq_single)) ** 2)
-        Ps = Ps + np.sum(0.5 * self.single_kr * (np.min(0, fqr_single)) ** 2)
-        Ps = Ps + np.sum(0.5 * self.multi_kq * (np.min(0, fq_multi)) ** 2)
-        Ps = Ps + np.sum(0.5 * self.multi_kr * (np.min(0, fqr_multi)) ** 2)
+        Ps = Ps + np.sum(0.5 * self.single_kq * (np.minimum(0, fq_single)) ** 2)
+        Ps = Ps + np.sum(0.5 * self.single_kr * (np.minimum(0, fqr_single)) ** 2)
+        Ps = Ps + np.sum(0.5 * self.multi_kq * (np.minimum(0, fq_multi)) ** 2)
+        Ps = Ps + np.sum(0.5 * self.multi_kr * (np.minimum(0, fqr_multi)) ** 2)
 
         return Ps
 
     def kesi_q(self, q):
         partial_f_q = np.zeros((1, 7))
-        q = q.reshape(7,)
-        q_scale_single = (q[self.single_mask] * self.single_scale)  # (1, n_single)
+        q = q.reshape(1, 7)
+        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
         for i, idx in enumerate(self.single_mask[0]):
             partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
         
@@ -284,10 +281,10 @@ class JointSpaceRegion(object):
         fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
 
         kesi_q = np.zeros((1, 7))
-        kesi_q = kesi_q + np.sum(self.single_kq * np.min(0, fq_single))
-        kesi_q = kesi_q + np.sum(self.single_kr * np.min(0, fqr_single))
-        kesi_q = kesi_q + np.sum(self.multi_kq * np.min(0, fq_multi))
-        kesi_q = kesi_q + np.sum(self.multi_kr * np.min(0, fqr_multi))
+        kesi_q = kesi_q + np.sum(self.single_kq * np.minimum(0, fq_single))
+        kesi_q = kesi_q + np.sum(self.single_kr * np.minimum(0, fqr_single))
+        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi))
+        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi))
         kesi_q = kesi_q * partial_f_q
 
         return kesi_q.reshape(1, -1)
@@ -338,14 +335,14 @@ class AdaptiveImageJacobian(object):
             self.Js_hat = J_cam2img @ J_base2cam  # Js_hat = J_base2img
 
         if L is not None:
-            if L.shape != (self.n_k, self.n_k):
+            if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
             raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
-            if W_hat.shape != (2 * self.m, self.n_k):
+            if W_hat.shape != (2 * self.m, self.n_k):  # (12, 1000)
                 raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
             self.W_hat = W_hat
         else:
@@ -383,19 +380,34 @@ class AdaptiveImageJacobian(object):
 
         # split Cartesian translation and quaternion
         r_tran = r.translation
-        r_quat = r.quaternion
+        r_quat = r.quaternion  # w, x, y, z
 
-        theta = self.get_theta(r_tran)  # get the neuron values theta(r)
+        theta = self.get_theta(r_tran)  # get the neuron values theta(r) (1000*1)
         J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
-        J_inv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        J_rot = Quat(r_quat).jacobian_rel2_axis_angle_()  # get the jacobian (partial p / partial r_o^T) (4, 3)
         
-        kesi_x = self.kesi_x()  # (1, 2)
-        kesi_r = self.kesi_r()  # (1, 3)
-        kesi_rq = self.kesi_rq()  # (1, 4)
-        kesi_q = self.kesi_q()  # (1, 7)
+        kesi_x = self.kesi_x().reshape(-1, 1)  # (2, 1)
+        kesi_rt = self.kesi_r().reshape(-1, 1)  # (3, 1)
+        kesi_rq = self.kesi_rq() @ J_rot  # (1, 4) @ (4, 3) = (1, 3)
+        kesi_r = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
+        kesi_q = self.kesi_q().reshape(-1, 1)  # (7, 1)
 
-        dW_hat1_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_inv.T @ kesi_q).T * kesi_x[0]
-        dW_hat2_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_inv.T @ kesi_q).T * kesi_x[1]
+        kesi_x_pie = np.c_[kesi_x[0] * np.eye(6), kesi_x[1] * np.eye(6)]  # (6, 12)
+
+        dW_hat = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T  # (1000, 6)
+        dW_hat = dW_hat @ kesi_x_pie  # (1000, 12)
+
+        self.W_hat = self.W_hat + dW_hat.T
+
+        # update J_s
+        temp_Js_hat = self.W_hat @ theta  # (12, 1)
+        self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
+
+        # deprecated
+        '''
+        dW_hat1_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T * kesi_x[0]
+        dW_hat2_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T * kesi_x[1]
 
         dW_hat1, dW_hat2 = dW_hat1_T.T, dW_hat2_T.T  # (6, n_k), (6, n_k)
         dW_hat = np.concatenate((dW_hat1, dW_hat2), axis=0)  # (12, n_k)
@@ -405,3 +417,62 @@ class AdaptiveImageJacobian(object):
         Js_hat2 = self.W_hat[6:, :] @ theta  # (6, 1)
         Js_hat = np.concatenate((Js_hat1.reshape(1, -1), Js_hat2.reshape(1, -1)), axis=0)  # (2, 6)
         self.Js_hat = Js_hat
+        '''
+
+class JointOutputRegionControl(object):
+    def __init__(self, fa: FrankaArm =None) -> None:
+        self.joint_space_region = JointSpaceRegion()
+        if fa is None:
+            raise ValueError('FrankaArm handle is not provided!')
+        self.fa = fa
+        self.cd = np.eye(7)
+
+        self.joint_space_region = JointSpaceRegion()
+
+    def init_joint_region(self):
+        self.joint_space_region.add_region_multi(np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), 0.08, 0.1, np.array([1, 1, 1, 1, 1, 1, 1]), kq=5000, kr=10, inner=True)
+
+    def get_dq_d_(self, q:np.ndarray, d:np.ndarray):
+        q, d = q.reshape(7,), d.reshape(7, 1)
+        J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
+        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        N = np.eye(7) - J_pinv @ J  # get the zero space matrix (7*7)
+        kesi_q = self.joint_space_region.kesi_q(q)
+
+        dq_d = - J_pinv @ (J_pinv.T @ kesi_q) + N @ np.linalg.inv(self.cd) @ d  # (7, 1)
+
+        return dq_d
+
+
+if __name__ == '__main__':
+    jsr = JointSpaceRegion()
+    jsr.add_region_multi(np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), 0.08, 0.1, np.array([1, 1, 1, 1, 1, 1, 1]), kq=5000, kr=10, inner=True)
+    
+    q_test = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
+
+    fq_s, fqr_s, fq_m, fqr_m = jsr.fq(q_test)
+    print(fq_s, fqr_s, fq_m, fqr_m)
+    fq_sin, fqr_sin = jsr.in_region(q_test)
+    print(fq_sin, fqr_sin)
+    Ps = jsr.Ps(q_test)
+    print(Ps)
+    kesi_q = jsr.kesi_q(q_test)
+    print(kesi_q)
+
+    q_test_list = []
+    qd_list = []
+    ps_list = []
+    for qd in np.linspace(0.5, 0.75, 400):
+        q_test = np.array([0.5, 0.5, qd, qd, 0.5, 0.5, 0.5])
+        ps = jsr.Ps(q_test)
+        kesi_q = jsr.kesi_q(q_test)
+        q_test_list.append(kesi_q.squeeze())
+        qd_list.append(qd)
+        ps_list.append(ps)
+
+    from matplotlib import pyplot as plt
+    plt.figure()
+    plt.plot(qd_list, ps_list)
+    plt.ylim(0, 0.005)
+    plt.show()
+    

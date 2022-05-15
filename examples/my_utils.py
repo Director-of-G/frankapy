@@ -72,10 +72,36 @@ class Quat(object):  # quaternion class
         else:
             return 2 * d_quat.logarithm_(return_norm=True)
 
-    def angle_axis_(self):
+    def axis_angle_(self):
         theta = 2 * math.acos(self.v_())
-        axis = self.u_() / np.linalg.norm(self.u_(), ord=2)
+        norm = np.linalg.norm(self.u_(), ord=2)
+        if norm == 0:
+            axis = np.zeros(3,)
+        else:
+            axis = self.u_() / norm
         return theta * axis.reshape(1, -1)
+
+    def jacobian_rel2_axis_angle_(self):
+        axis_angle = self.axis_angle_()  # r_o, (1, 3)
+        axis_angle_square = (axis_angle ** 2)  # (1, 3)
+        n_axis_angle = np.linalg.norm(axis_angle, ord=2)
+
+        J_A = - (axis_angle/ (2 * n_axis_angle)) * math.sin(n_axis_angle / 2)  # (1, 3)
+
+        J_B = np.concatenate((axis_angle_square, n_axis_angle ** 2 - axis_angle_square), axis=0).T  # (3, 2)
+        J_B = J_B @ np.array([[math.cos(n_axis_angle / 2) / (2 * n_axis_angle ** 2)], \
+                              [math.sin(n_axis_angle / 2) / (n_axis_angle ** 3)]])  # (2, 1)
+        J_B = np.diag(J_B.reshape(-1,))  # (3, 3)
+
+        J_C = axis_angle.T @ axis_angle  # (3, 3)
+        J_C = np.expand_dims(J_C, axis=-1).repeat(2, 2)  # (3, 3, 2)
+        J_C = J_C @ np.array([[math.cos(n_axis_angle / 2) / (2 * n_axis_angle ** 2)], \
+                              [-math.sin(n_axis_angle / 2) / (n_axis_angle ** 3)]])  # (3, 3, 1)
+        J_C = J_C.squeeze() * (1 - np.eye(3)) # (3, 3)
+
+        J_rot = np.concatenate((J_A, J_B + J_C), axis=0)  # (4, 3)
+
+        return J_rot
 
     def __eq__(self, quat_) -> bool:
         return (self.w_() == quat_.w_()) and (self.x_() == quat_.x_()) and (self.y_() == quat_.y_()) and (self.z_() == quat_.z_())
@@ -115,6 +141,6 @@ class RadialBF(object):  # radial basis function(RBF) class
 
     def get_rbf_(self, r):
         r = r.reshape(1, 3)
-        return np.exp(-(np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2) / (2 * self.rbf_sigma2_))
+        return np.exp(-(np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2) / (2 * self.rbf_sigma2_)).reshape(-1, 1)
 
         
