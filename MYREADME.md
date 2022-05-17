@@ -103,6 +103,14 @@
         python ./examples/my_haptic_subscriber_hololens.py
         ```
 
+* **0517**
+    * 完成了region control部分关于region的定义，见`my_adaptive_control.py`中`ImageSpaceRegion`、`CartesianSpaceRegion`、`CartesianQuatSpaceRegion`、`JointSpaceRegion`，和论文中的large scale控制律`AdaptiveImageJacobian`
+    * 在gazebo中搭建仿真环境，调试`JointSpaceRegion`的控制效果。设置一个目标region控制Franka在关节空间接近目标；同时设置一个奇异点region控制Franka远离奇异位置, gazebo中的测试代码mian()为test_joint_space_region_control, 只考虑joint space的控制律为`JointOutputRegionControl`  
+      * 设Franka的Body Jacobian为$J_b$, 则用manipubility描述机械臂运动学奇异程度$\mu(J_b)=\sqrt{det(J_b{{J_b}^T})}$  
+      * 测试结果见`/data/0517/test_joint_space_region.png`, 左图为机械臂运动过程中, 在关节空间距离奇异点的2-范数距离, 右图为机械臂运动过程中的manipubility变化  
+      * gazebo仿真环境搭建, 主要利用`franka_ros`包里的`franka_gazebo`和`franka_example_controllers`两个package实现, 目前修改了`franka_example_controllers::joint_velocity_example_controller`。具体修改相当于添加了若干subscriber和publisher，通过subscriber接收topics上的关节速度控制指令，通过publisher发布Franka的body jacobian、joint angle、joint velocity、end effector pose等一系列指令。请注意，各franka_example_controller继承自controller_interface::MultiInterfaceController，使用相关hardware interface，请修改controller_interface::MultiInterfaceController的模板参数，否则通过`robot_hw->get`索取hardware interface可能会返回nullptr
+    * 经过测试发现，假设body jacobian为$J_b$，其伪逆${J_b}^+$，则控制律中与joint space region相关的分量$u=-{J_b}^+{J}\xi_{q}$
+
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
     * In scipy: `[x, y, z, w]`
