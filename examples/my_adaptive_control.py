@@ -4,7 +4,7 @@
 """
 import collections
 from matplotlib.contour import ContourLabeler
-from frankapy.franka_arm import FrankaArm
+# from frankapy.franka_arm import FrankaArm
 import rospy
 # import tf
 
@@ -302,7 +302,8 @@ class AdaptiveImageJacobian(object):
         @ Class: AdaptiveImageJacobian
         @ Function: adaptive update the image jacobian
     """
-    def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    # def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
         # n_k_per_dim => the number of rbfs in each dimension
         if fa is None:
             raise ValueError('FrankaArm handle is not provided!')
@@ -427,7 +428,8 @@ class AdaptiveImageJacobian(object):
         '''
 
 class JointOutputRegionControl(object):
-    def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
+    # def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
+    def __init__(self, sim_or_real='sim', fa=None) -> None:
         self.joint_space_region = JointSpaceRegion()
         self.sim_or_real = sim_or_real
         if sim_or_real == 'real':
