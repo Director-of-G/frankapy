@@ -618,6 +618,6 @@ if __name__ == '__main__':
     # plt.ylim(0, 0.005)
     # plt.show()
 
-    # test_joint_space_region_control()
-    plot_figures()
+    test_joint_space_region_control()
+    # plot_figures()
     

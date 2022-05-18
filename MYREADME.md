@@ -110,6 +110,41 @@
       * 测试结果见`/data/0517/test_joint_space_region.png`, 左图为机械臂运动过程中, 在关节空间距离奇异点的2-范数距离, 右图为机械臂运动过程中的manipubility变化  
       * gazebo仿真环境搭建, 主要利用`franka_ros`包里的`franka_gazebo`和`franka_example_controllers`两个package实现, 目前修改了`franka_example_controllers::joint_velocity_example_controller`。具体修改相当于添加了若干subscriber和publisher，通过subscriber接收topics上的关节速度控制指令，通过publisher发布Franka的body jacobian、joint angle、joint velocity、end effector pose等一系列指令。请注意，各franka_example_controller继承自controller_interface::MultiInterfaceController，使用相关hardware interface，请修改controller_interface::MultiInterfaceController的模板参数，否则通过`robot_hw->get`索取hardware interface可能会返回nullptr
     * 经过测试发现，假设body jacobian为$J_b$，其伪逆${J_b}^+$，则控制律中与joint space region相关的分量$u=-{J_b}^+{J}\xi_{q}$
+    * ***Tutorial for Gazebo Simulation***
+      1. Clone the `franka_ros` package from github.
+        ```
+            git clone https://github.com/Director-of-G/franka_ros.git
+        ``` 
+      2. When you modified anything in `franka_ros`, remember to `catkin_make` the workspace.
+      3. Clone the `frankapy` package from github.
+        ```
+            git clone https://github.com/Director-of-G/frankapy.git
+        ```
+      4. Add the following line into `~/.bashrc`.
+        ```
+            source ~/franka_ws/devel/setup.bash
+        ```
+      5. Launch the Franka Gazebo environment.
+        ```
+            roslaunch franka_gazebo panda.launch x:=-0.5 \
+              world:=$(rospack find franka_gazebo)/world/stone.sdf \
+              controller:=joint_velocity_example_controller \
+              rviz:=true
+        ```
+      6. Launch the frankapy controller. Make sure the test code `test_joint_space_region_control()` is not commented in main().
+        ```
+            cd /path/to/frankapy
+            python ./examples/my_adaptive_control.py
+        ```
+      7. To add joint regions, it is recommended to use `JointSpaceRegion.add_region_multi()`, following parameters should be included.
+           * **qc**: np.ndarray -- region center in joint space (radians, shape=(7,))
+           * **qbound**: float -- radius of the joint space region(hyper-sphere of hyper-ellipsoid)
+           * **qrbound**: float -- radius of the joint space reference region(hyper-sphere of hyper-ellipsoid)
+           * **mask**: np.ndarray -- which joint are considered in the joint space region (eg. np.array([1, 1, 1, 1, 1, 1, 1]) means all joints are considered, while np.array([1, 0, 1, 1, 0, 1, 1]) means $joint1$ and $joint4$ are excluded)
+           * **kq**: float -- parameter $k_{qi}$
+           * **kr**: float -- parameter $k_{ri}$
+           * **inner**: bool -- whether the region should be reached (`inner=False`) or kept away from (`inner=True`)
+           * **scale**: np.ndarray -- scale factor of different joints (eg. np.array([1, 1, 1, 1, 1, 1, 1]) means the hyper-sphere joint region, while np.array([1, 2, 1, 0.5, 1, 0.25, 4]) means the hyper-ellisoid joint region)
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
