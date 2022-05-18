@@ -2,9 +2,11 @@
     my_adaptive_control.py, 2022-05-01
     Copyright 2022 IRM Lab. All rights reserved.
 """
-from frankapy.franka_arm import FrankaArm
+import collections
+from matplotlib.contour import ContourLabeler
+# from frankapy.franka_arm import FrankaArm
 import rospy
-import tf
+# import tf
 
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -300,7 +302,8 @@ class AdaptiveImageJacobian(object):
         @ Class: AdaptiveImageJacobian
         @ Function: adaptive update the image jacobian
     """
-    def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    # def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
         # n_k_per_dim => the number of rbfs in each dimension
         if fa is None:
             raise ValueError('FrankaArm handle is not provided!')
@@ -425,7 +428,8 @@ class AdaptiveImageJacobian(object):
         '''
 
 class JointOutputRegionControl(object):
-    def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
+    # def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
+    def __init__(self, sim_or_real='sim', fa=None) -> None:
         self.joint_space_region = JointSpaceRegion()
         self.sim_or_real = sim_or_real
         if sim_or_real == 'real':
@@ -481,6 +485,141 @@ class JointOutputRegionControl(object):
 
         return dq_d, kesi_q
 
+# test code by adaptive control
+def test_joint_space_region_control():
+    from std_msgs.msg import Float64MultiArray
+    class data_colletion(object):
+        def __init__(self) -> None:
+            self.J = np.zeros((6, 7))
+            self.q = np.zeros((7,))
+            self.J_ready = False
+            self.q_ready = False
+
+        def zero_jacobian_callback(self, msg):
+            self.J = np.array(msg.data).reshape(6, 7)
+            if not self.J_ready:
+                self.J_ready = True
+
+        def joint_angles_callback(self, msg):
+            self.q = np.array(msg.data).reshape(7,)
+            if not self.q_ready:
+                self.q_ready = True
+
+        def is_data_ready(self):
+            return self.J_ready | self.q_ready
+
+    data_c = data_colletion()
+    controller = JointOutputRegionControl(sim_or_real='sim', fa=None)
+    
+    nh_ = rospy.init_node('joint_space_region_testbanch', anonymous=True)
+    pub_ = rospy.Publisher('/gazebo_sim/joint_velocity_desired', Float64MultiArray, queue_size=10)
+    sub_J_ = rospy.Subscriber('/gazebo_sim/zero_jacobian', Float64MultiArray, data_c.zero_jacobian_callback, queue_size=1)
+    sub_q_ = rospy.Subscriber('/gazebo_sim/joint_angles', Float64MultiArray, data_c.joint_angles_callback, queue_size=1)
+    rate_ = rospy.Rate(10)
+
+    dq_d_list = []
+    kesi_q_list = []
+    dist_list = []
+    q_and_manipubility_list = np.zeros((0, 8))
+
+    import time
+    time_start = time.time()
+
+    while not rospy.is_shutdown():
+        if data_c.is_data_ready():
+            q_and_m = np.zeros((1, 8))
+            q_and_m[0, :7] = data_c.q
+            q_and_m[0, 7] = controller.calc_manipubility(data_c.J)
+            dist = np.linalg.norm((np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]) - data_c.q), ord=2)
+            dist_list.append(dist)
+            q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
+            dq_d_, kesi_q = controller.get_dq_d_(q=data_c.q, d=np.zeros((7, 1)), J_sim=data_c.J)
+            dq_d_list.append(dq_d_.reshape(7,).tolist())
+            kesi_q_list.append(kesi_q.reshape(7,).tolist())
+            msg = Float64MultiArray()
+            msg.data = dq_d_.reshape(7,)
+            pub_.publish(msg)
+
+            if time.time() - time_start >= 25.0:
+                break
+
+        rate_.sleep()
+
+    np.save('./data/0517/q_and_m.npy', q_and_manipubility_list)
+    from matplotlib import pyplot as plt
+    import pickle
+    plt.figure()
+    plt.subplot(2, 2, 1)
+    plt.plot(dq_d_list)
+    plt.legend(['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7'])
+    plt.subplot(2, 2, 2)
+    plt.plot(kesi_q_list)
+    plt.legend(['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7'])
+    plt.subplot(2, 2, 3)
+    plt.plot(dist_list)
+    plt.subplot(2, 2, 4)
+    plt.plot(q_and_manipubility_list[:, 7])
+    plt.show()
+    info = {'dq_d': dq_d_list, \
+            'kesi_q': kesi_q_list, \
+            'dist': dist_list, \
+            'q_and_manip': q_and_manipubility_list}
+    with open('./data/0517/q_and_manip.pkl', 'wb') as f:
+        pickle.dump(info, f)
+
+def plot_figures():
+    import pickle
+    with open('./data/0517/q_and_manip_with_jr.pkl', 'rb') as f:
+        data1 = pickle.load(f)
+    with open('./data/0517/q_and_manip_withno_jr.pkl', 'rb') as f:
+        data2 = pickle.load(f)
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(data1['dist'], color='r')
+    plt.plot(data2['dist'], color='b')
+    plt.title('distance to singularity')
+    plt.legend(['with jsr', 'with no jsr'])
+    plt.subplot(1, 2, 2)
+    plt.plot(data1['q_and_manip'][:, 7], color='r')
+    plt.plot(data2['q_and_manip'][:, 7], color='b')
+    plt.title('manipubility')
+    plt.legend(['with jsr', 'with no jsr'])
+    plt.savefig('./data/0517/test_joint_space_region.png', dpi=600)
+    plt.show()
+
 
 if __name__ == '__main__':
-    pass
+    # jsr = JointSpaceRegion()
+    # jsr.add_region_multi(np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), 0.08, 0.1, np.array([1, 1, 1, 1, 1, 1, 1]), kq=5000, kr=10, inner=True)
+    
+    # q_test = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
+
+    # fq_s, fqr_s, fq_m, fqr_m = jsr.fq(q_test)
+    # print(fq_s, fqr_s, fq_m, fqr_m)
+    # fq_sin, fqr_sin = jsr.in_region(q_test)
+    # print(fq_sin, fqr_sin)
+    # Ps = jsr.Ps(q_test)
+    # print(Ps)
+    # kesi_q = jsr.kesi_q(q_test)
+    # print(kesi_q)
+
+    # q_test_list = []
+    # qd_list = []
+    # ps_list = []
+    # for qd in np.linspace(0.5, 0.75, 400):
+    #     q_test = np.array([0.5, 0.5, qd, qd, 0.5, 0.5, 0.5])
+    #     ps = jsr.Ps(q_test)
+    #     kesi_q = jsr.kesi_q(q_test)
+    #     q_test_list.append(kesi_q.squeeze())
+    #     qd_list.append(qd)
+    #     ps_list.append(ps)
+
+    # from matplotlib import pyplot as plt
+    # plt.figure()
+    # plt.plot(qd_list, ps_list)
+    # plt.ylim(0, 0.005)
+    # plt.show()
+
+    test_joint_space_region_control()
+    # plot_figures()
+    

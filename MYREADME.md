@@ -131,12 +131,12 @@
               controller:=joint_velocity_example_controller \
               rviz:=true
         ```
-      6. Launch the frankapy controller in `./examples/my_adaptive_control.py`. Make sure the test code `test_joint_space_region_control()` is not commented in main().
+      6. Launch the frankapy controller in `./examples/gazebo/my_gzb_adaptive_control.py`. Make sure the test code `test_joint_space_region_control()` is not commented in main().
         ```
             cd /path/to/frankapy
-            python ./examples/my_adaptive_control.py
+            python ./examples/gazebo/my_gzb_adaptive_control.py
         ```
-      7. To add joint regions, it is recommended to use `JointSpaceRegion.add_region_multi()` in `./examples/my_adaptive_control.py`, the following parameters should be included.
+      7. To add joint regions, it is recommended to use `JointSpaceRegion.add_region_multi()` in `./examples/gazebo/my_gzb_adaptive_control.py`, the following parameters should be included.
            * **qc**: np.ndarray -- region center in joint space (radians, shape=(7,))
            * **qbound**: float -- radius of the joint space region(hyper-sphere of hyper-ellipsoid)
            * **qrbound**: float -- radius of the joint space reference region(hyper-sphere of hyper-ellipsoid)
