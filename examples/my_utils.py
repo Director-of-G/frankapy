@@ -5,7 +5,6 @@
 
 import numpy as np
 import math
-import itertools
 
 class Quat(object):  # quaternion class
     def __init__(self, value:np.ndarray=np.array([1, 0, 0, 0])) -> None:
@@ -54,7 +53,7 @@ class Quat(object):  # quaternion class
         return self.product_(quat_.inverse_())
 
     def logarithm_(self, return_norm=True):
-        if np.all(self.u_() == 0):
+        if np.linalg.norm(self.u_()) == 0:
             if return_norm:
                 return 0
             else:
@@ -143,4 +142,7 @@ class RadialBF(object):  # radial basis function(RBF) class
         r = r.reshape(1, 3)
         return np.exp(-(np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2) / (2 * self.rbf_sigma2_)).reshape(-1, 1)
 
-        
+
+if __name__ == '__main__':
+    import pdb
+    pdb.set_trace()
