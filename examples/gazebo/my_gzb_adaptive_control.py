@@ -169,7 +169,10 @@ class CartesianQuatSpaceRegion(object):
         self.Ko = Ko  # float
     
     def fo(self, q:Quat, return_diff=False):
-        self.q_diff = q.dq_(self.q_g)
+        q_unit = q.unit_()
+        q_g_unit = self.q_g.unit_()
+        self.q_diff = q_unit.dq_(q_g_unit).unit_()
+        # self.q_diff = q_g_unit.dq_(q_unit)
         if return_diff:
             return self.Ko * self.q_diff.logarithm_(return_norm=True) - 1, self.q_diff
         else:
@@ -197,13 +200,14 @@ class CartesianQuatSpaceRegion(object):
         pass
 
     def kesi_rq(self, q:np.ndarray):  # q => (4,)
-        q = Quat(q)
+        q, q_g = Quat(q).unit_(), self.q_g.unit_()
+        q_o, q_g_inv = q.quat, q_g.inverse_().quat
         fo, q_diff = self.fo(q, return_diff=True)
-        q_o, q_g = q.quat, self.q_g.quat
-        partial_v_q = np.array([q_g[0] + q_o[0] * np.sum(q_g[[1, 2, 3]]/q_o[[1, 2, 3]]), \
-                                -q_g[1] + q_o[1] * np.sum(q_g[[0, 2, 3]]/q_o[[0, 2, 3]]), \
-                                -q_g[2] + q_o[2] * np.sum(q_g[[0, 1, 3]]/q_o[[0, 1, 3]]), \
-                                -q_g[3] + q_o[3] * np.sum(q_g[[0, 1, 2]]/q_o[[0, 1, 2]])])  # (4,)
+        q_sign = np.array([-1, 1, 1])
+        partial_v_q = np.array([q_g_inv[0] + q_o[0] * np.sum(q_g_inv[[1, 2, 3]]/q_o[[1, 2, 3]]), \
+                                -q_g_inv[1] + q_o[1] * np.sum(q_g_inv[[0, 2, 3]]/q_o[[0, 2, 3]]*q_sign), \
+                                -q_g_inv[2] + q_o[2] * np.sum(q_g_inv[[0, 1, 3]]/q_o[[0, 1, 3]]*q_sign), \
+                                -q_g_inv[3] + q_o[3] * np.sum(q_g_inv[[0, 1, 2]]/q_o[[0, 1, 2]]*q_sign)])  # (4,)
         u = q_diff.u_()
         norm_u = np.linalg.norm(u, ord=2)
 
@@ -477,23 +481,25 @@ class JointOutputRegionControl(object):
                                                  kq=1, kr=0.01, \
                                                  inner=False, scale=np.ones((7, 1)))
 
-        # self.joint_space_region.add_region_multi(qc=np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]), \
-        #                                          qbound=0.50, qrbound=0.45, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=1000000, kr=10000, \
-        #                                          inner=True, scale=np.ones((7, 1)))
+        self.joint_space_region.add_region_multi(qc=np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]), \
+                                                 qbound=0.50, qrbound=0.45, \
+                                                 mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
+                                                 kq=1000000, kr=10000, \
+                                                 inner=True, scale=np.ones((7, 1)))
 
     def calc_manipubility(self, J_b):
         det = np.linalg.det(J_b @ J_b.T)
         return math.sqrt(np.abs(det))
 
-    def get_dq_d_(self, q:np.ndarray, d:np.ndarray=np.zeros((7, 1)), J_sim:np.ndarray=None):
+    def get_dq_d_(self, q:np.ndarray, d:np.ndarray=np.zeros((7, 1)), J_sim:np.ndarray=None, time_start_this_loop=None):
         q, d = q.reshape(7,), d.reshape(7, 1)
         if self.sim_or_real == 'real':
             J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
         elif self.sim_or_real == 'sim':
             J = J_sim
+        print('time consumption2: ', time.time() - time_start_this_loop)
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        print('time consumption3: ', time.time() - time_start_this_loop)
         N = np.eye(7) - J_pinv @ J  # get the zero space matrix (7*7)
         kesi_q = self.joint_space_region.kesi_q(q).reshape(7, 1)
 
@@ -531,7 +537,7 @@ def test_joint_space_region_control():
     pub_ = rospy.Publisher('/gazebo_sim/joint_velocity_desired', Float64MultiArray, queue_size=10)
     sub_J_ = rospy.Subscriber('/gazebo_sim/zero_jacobian', Float64MultiArray, data_c.zero_jacobian_callback, queue_size=1)
     sub_q_ = rospy.Subscriber('/gazebo_sim/joint_angles', Float64MultiArray, data_c.joint_angles_callback, queue_size=1)
-    rate_ = rospy.Rate(10)
+    rate_ = rospy.Rate(30)
 
     dq_d_list = []
     kesi_q_list = []
@@ -542,25 +548,28 @@ def test_joint_space_region_control():
 
     while not rospy.is_shutdown():
         if data_c.is_data_ready():
+            time_start_this_loop = time.time()
             q_and_m = np.zeros((1, 8))
             q_and_m[0, :7] = data_c.q
             q_and_m[0, 7] = controller.calc_manipubility(data_c.J)
             dist = np.linalg.norm((np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]) - data_c.q), ord=2)
             dist_list.append(dist)
             q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
-            dq_d_, kesi_q = controller.get_dq_d_(q=data_c.q, d=np.zeros((7, 1)), J_sim=data_c.J)
+            print('time consumption1: ', time.time() - time_start_this_loop)
+            dq_d_, kesi_q = controller.get_dq_d_(q=data_c.q, d=np.zeros((7, 1)), J_sim=data_c.J, time_start_this_loop=time_start_this_loop)
             dq_d_list.append(dq_d_.reshape(7,).tolist())
             kesi_q_list.append(kesi_q.reshape(7,).tolist())
             msg = Float64MultiArray()
             msg.data = dq_d_.reshape(7,)
             pub_.publish(msg)
+            print('time consumption4: ', time.time() - time_start_this_loop)
 
             if time.time() - time_start >= 25.0:
                 break
 
         rate_.sleep()
 
-    np.save('./data/0517/q_and_m.npy', q_and_manipubility_list)
+    np.save('./data/0520/q_and_m.npy', q_and_manipubility_list)
     plt.figure()
     plt.subplot(2, 2, 1)
     plt.plot(dq_d_list)
@@ -577,7 +586,7 @@ def test_joint_space_region_control():
             'kesi_q': kesi_q_list, \
             'dist': dist_list, \
             'q_and_manip': q_and_manipubility_list}
-    with open('./data/0517/q_and_manip.pkl', 'wb') as f:
+    with open('./data/0520/q_and_manip.pkl', 'wb') as f:
         pickle.dump(info, f)
 
 # Cartesian space test code of my adaptive control
@@ -624,7 +633,7 @@ def test_cartesian_joint_space_region_control():
     controller_r.set_Kc(np.array([0.00024, 0.00008, 0.00008]).reshape(1, 3))
 
     # controller_rq.set_q_g(np.array([0.018123963264730075, 0.9941285663016644, -0.0020305968914211114, 0.10663487821459938]))
-    controller_rq.set_q_g(np.array([0.29883651277533735, 0.8705898433100522, 0.14233606477096622, 0.3640131657337035]))
+    controller_rq.set_q_g(np.array([0.0004200682001275777, 0.9028032461428314, -0.00021468888469159875, -0.4300479986956025]))
     controller_rq.set_Ko(5)
     
     nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
@@ -632,18 +641,26 @@ def test_cartesian_joint_space_region_control():
     sub_J_ = rospy.Subscriber('/gazebo_sim/zero_jacobian', Float64MultiArray, data_c.zero_jacobian_callback, queue_size=1)
     sub_q_ = rospy.Subscriber('/gazebo_sim/joint_angles', Float64MultiArray, data_c.joint_angles_callback, queue_size=1)
     sub_ee_pose_ = rospy.Subscriber('/gazebo_sim/ee_pose', Float64MultiArray, data_c.pose_callback, queue_size=1)
-    rate_ = rospy.Rate(10)
+    rate_ = rospy.Rate(100)
 
-    f_quat_list = []
+    f_quat_list, p_quat_list, quat_list = [], [], []
     start_time = time.time()
 
     # update control scheme
     while not rospy.is_shutdown():
         if data_c.is_data_ready():
             kesi_r = controller_r.kesi_r(data_c.trans.reshape(1, 3))  # (1, 3)
-            kesi_rq = controller_rq.kesi_rq(data_c.quat) / 100  # (1, 3)
+            kesi_rq = controller_rq.kesi_rq(data_c.quat) / 50  # (1, 3)
             kesi_q = controller_j.kesi_q(data_c.q).reshape(7, 1)  # (7, 1)
             kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
+
+            # convertion between spatial Twist and body Twist
+            rotMat = R.from_quat(data_c.quat[[1, 2, 3, 0]]).as_matrix()
+            p = data_c.trans
+            pMat = np.array([[0, -p[2], p[1]], \
+                             [p[2], 0, -p[0]], \
+                             [-p[1], p[0], 0]])
+            T = np.block([[rotMat, np.zeros((3, 3))], [pMat @ rotMat, rotMat]])
 
             J = data_c.J
             J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
@@ -654,6 +671,8 @@ def test_cartesian_joint_space_region_control():
             pub_.publish(msg)
 
             f_quat_list.append(controller_rq.fo(Quat(data_c.quat)))
+            p_quat_list.append(controller_rq.Po(Quat(data_c.quat)))
+            quat_list.append(data_c.quat.tolist())
             if time.time() - start_time >= 150.0:
                 break
 
@@ -663,15 +682,19 @@ def test_cartesian_joint_space_region_control():
         rate_.sleep()
     
     plt.figure()
-    plt.plot(f_quat_list)
+    plt.subplot(1, 2, 1)
+    plt.plot(f_quat_list, color='b')
+    plt.plot(p_quat_list, color='r')
+    plt.subplot(1, 2, 2)
+    plt.plot(quat_list)
     plt.show()
 
 
 def plot_figures():
     import pickle
-    with open('./data/0517/q_and_manip_with_jr.pkl', 'rb') as f:
+    with open('./data/0520/q_and_manip_with_jr.pkl', 'rb') as f:
         data1 = pickle.load(f)
-    with open('./data/0517/q_and_manip_withno_jr.pkl', 'rb') as f:
+    with open('./data/0520/q_and_manip_withno_jr.pkl', 'rb') as f:
         data2 = pickle.load(f)
     plt.figure()
     plt.subplot(1, 2, 1)
@@ -684,7 +707,7 @@ def plot_figures():
     plt.plot(data2['q_and_manip'][:, 7], color='b')
     plt.title('manipubility')
     plt.legend(['with jsr', 'with no jsr'])
-    plt.savefig('./data/0517/test_joint_space_region.png', dpi=600)
+    plt.savefig('./data/0520/test_joint_space_region.png', dpi=600)
     plt.show()
 
 
