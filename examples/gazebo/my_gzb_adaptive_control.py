@@ -216,6 +216,17 @@ class CartesianQuatSpaceRegion(object):
 
         return (partial_P_q @ J_rot).reshape(1, -1)
 
+    def kesi_rq_omega(self, q:np.ndarray):
+        q, q_g = Quat(q).unit_(), self.q_g.unit_()
+        q_diff = q.dq_(q_g)
+
+        axis, theta = q_diff.axis_angle_(split=True)
+        axis_normalized = axis / np.linalg.norm(axis, ord=2)
+        if theta > math.pi:
+            theta = - (2 * math.pi - theta)
+        return theta * axis_normalized.reshape(1, 3)
+        
+
 class JointSpaceRegion(object):
     def __init__(self) -> None:
         self.single_kq = np.zeros((1, 0))
@@ -628,13 +639,17 @@ def test_cartesian_joint_space_region_control():
 
     # init control scheme
     # controller_r.set_r_c(np.array([-0.4274491954570557, 0.17649338322602143, 0.0877387993047109]).reshape(1, 3))
-    controller_r.set_r_c(np.array([0.30705422269100857, -7.524700079232461e-06, 0.4870834722065375]))
-    controller_r.set_c(np.array([0.05, 0.05, 0.05]).reshape(1, 3))
-    controller_r.set_Kc(np.array([0.00024, 0.00008, 0.00008]).reshape(1, 3))
+    # controller_r.set_r_c(np.array([0.30705422269100857, -7.524700079232461e-06, 0.4870834722065375]))  # starting point
+    controller_r.set_r_c(np.array([-0.01624475011413961, 0.5786721263542499, 0.30532807964440667]))  # grasping pose on the right
+    controller_r.set_c(np.array([0.01, 0.01, 0.01]).reshape(1, 3))
+    controller_r.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
 
     # controller_rq.set_q_g(np.array([0.018123963264730075, 0.9941285663016644, -0.0020305968914211114, 0.10663487821459938]))
-    controller_rq.set_q_g(np.array([0.0004200682001275777, 0.9028032461428314, -0.00021468888469159875, -0.4300479986956025]))
-    controller_rq.set_Ko(5)
+    # controller_rq.set_q_g(np.array([0.0004200682001275777, 0.9028032461428314, -0.00021468888469159875, -0.4300479986956025]))  # rot_Y(-90)
+    # controller_rq.set_q_g(np.array([0.0005740008069370812, 0.708744905485196, -0.7054320813712253, 0.00603014709058085]))  # rot_Z(+90)
+    # controller_rq.set_q_g(np.array([0.5396668336145884, -0.841829320383993, 0.00250734600652218, -0.008486521399793301]))  # rot_X(+90)
+    controller_rq.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
+    controller_rq.set_Ko(15)
     
     nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     pub_ = rospy.Publisher('/gazebo_sim/joint_velocity_desired', Float64MultiArray, queue_size=10)
@@ -644,13 +659,26 @@ def test_cartesian_joint_space_region_control():
     rate_ = rospy.Rate(100)
 
     f_quat_list, p_quat_list, quat_list = [], [], []
+    dist_list = []
+    q_and_manipubility_list = np.zeros((0, 8))
     start_time = time.time()
 
     # update control scheme
     while not rospy.is_shutdown():
         if data_c.is_data_ready():
+            q_and_m = np.zeros((1, 8))
+            q_and_m[0, :7] = data_c.q
+            q_and_m[0, 7] = math.sqrt(np.abs(np.linalg.det(data_c.J @ data_c.J.T)))
+            dist = np.linalg.norm((np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]) - data_c.q), ord=2)
+            dist_list.append(dist)
+            q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
+
             kesi_r = controller_r.kesi_r(data_c.trans.reshape(1, 3))  # (1, 3)
-            kesi_rq = controller_rq.kesi_rq(data_c.quat) / 50  # (1, 3)
+            # kesi_rq = controller_rq.kesi_rq(data_c.quat) / 50  # (1, 3)
+            if controller_rq.fo(Quat(data_c.quat)) <= 0:
+                kesi_rq = np.zeros((1, 3))
+            else:
+                kesi_rq = controller_rq.kesi_rq_omega(data_c.quat) / 2 # (1, 3)
             kesi_q = controller_j.kesi_q(data_c.q).reshape(7, 1)  # (7, 1)
             kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
 
@@ -673,7 +701,7 @@ def test_cartesian_joint_space_region_control():
             f_quat_list.append(controller_rq.fo(Quat(data_c.quat)))
             p_quat_list.append(controller_rq.Po(Quat(data_c.quat)))
             quat_list.append(data_c.quat.tolist())
-            if time.time() - start_time >= 150.0:
+            if time.time() - start_time >= 60.0:
                 break
 
             print(kesi_r)
@@ -688,18 +716,22 @@ def test_cartesian_joint_space_region_control():
     plt.subplot(1, 2, 2)
     plt.plot(quat_list)
     plt.show()
+    info = {'dist': dist_list, \
+            'q_and_manip': q_and_manipubility_list}
+    with open('./data/0521/q_and_manip.pkl', 'wb') as f:
+        pickle.dump(info, f)
 
 
 def plot_figures():
     import pickle
-    with open('./data/0520/q_and_manip_with_jr.pkl', 'rb') as f:
+    with open('./data/0521/q_and_manip.pkl', 'rb') as f:
         data1 = pickle.load(f)
-    with open('./data/0520/q_and_manip_withno_jr.pkl', 'rb') as f:
+    with open('./data/0521/q_and_manip.pkl', 'rb') as f:
         data2 = pickle.load(f)
     plt.figure()
     plt.subplot(1, 2, 1)
-    plt.plot(data1['dist'], color='r')
-    plt.plot(data2['dist'], color='b')
+    plt.plot(data1['q_and_manip'][:, :7], color='r')
+    plt.plot(data2['q_and_manip'][:, :7], color='b')
     plt.title('distance to singularity')
     plt.legend(['with jsr', 'with no jsr'])
     plt.subplot(1, 2, 2)
@@ -707,7 +739,7 @@ def plot_figures():
     plt.plot(data2['q_and_manip'][:, 7], color='b')
     plt.title('manipubility')
     plt.legend(['with jsr', 'with no jsr'])
-    plt.savefig('./data/0520/test_joint_space_region.png', dpi=600)
+    plt.savefig('./data/0521/test_Cartesian_space_region.png', dpi=600)
     plt.show()
 
 

@@ -71,14 +71,17 @@ class Quat(object):  # quaternion class
         else:
             return 2 * d_quat.logarithm_(return_norm=True)
 
-    def axis_angle_(self):
+    def axis_angle_(self, split=False):
         theta = 2 * math.acos(self.v_())
         norm = np.linalg.norm(self.u_(), ord=2)
         if norm == 0:
             axis = np.zeros(3,)
         else:
             axis = self.u_() / norm
-        return theta * axis.reshape(1, -1)
+        if split:
+            return axis, theta
+        else:
+            return theta * axis.reshape(1, -1)
 
     def jacobian_rel2_axis_angle_(self):
         axis_angle = self.axis_angle_()  # r_o, (1, 3)
