@@ -146,6 +146,48 @@
            * **inner**: bool -- whether the region should be reached (`inner=False`) or kept away from (`inner=True`)
            * **scale**: np.ndarray -- scale factor of different joints (eg. np.array([1, 1, 1, 1, 1, 1, 1]) means the hyper-sphere joint region, while np.array([1, 2, 1, 0.5, 1, 0.25, 4]) means the hyper-ellisoid joint region)
 
+* **0526**
+    * 在Gazebo中搭建好Journal实验所需的仿真环境，包括Franka Panda Arm、相机、Franka Gripper和抓取物体(带有ArUco码)
+    * ***Tutorial for Gazebo Simulation***
+      1. `git clone` or `git pull` the `franka_ros` package from github into your workspace, like `franka_ws/src`.
+        ```
+            git clone https://github.com/Director-of-G/franka_ros.git
+        ``` 
+      2. `git clone` or `git pull`  the `frankapy` package from github.
+        ```
+            git clone https://github.com/Director-of-G/frankapy.git
+        ```
+      3. ArUco markers are rendered in Gazebo as types of material, declared through the \<material\> label. Thus a material description script and pictures of the material are needed, which are provided in `/path/to/franka_ros/utils`. Note the path `/usr/share/gazebo-9/media/materials` as `<gazebo_prefix>`. We should copy the files as follows
+        ```
+            sudo cp /path/to/franka_ros/utils/aruco_98.png <gazebo_prefix>/textures/aruco_98.png \
+            sudo cp /path/to/franka_ros/utils/aruco_123.png <gazebo_prefix>/textures/aruco_123.png \
+            sudo cp /path/to/franka_ros/utils/aruco.material <gazebo_prefix>/scripts/aruco.material
+        ```
+      4. Modify file `double.launch` in the `aruco_ros` package. Six lines need to be changed.
+        ```
+            <arg name="marker1Id"         default="98"/>
+            <arg name="marker2Id"         default="123"/>
+            <arg name="markerSize"        default="0.04"/>    <!-- in m -->
+            <arg name="dct_normalization" default="False" />
+            <remap from="/camera_info" to="/franka/camera1/camera_info" />
+            <remap from="/image" to="/franka/camera1/image_raw" />
+        ```
+      5. Launch the Gazebo simulation environment.
+        ```
+            roslaunch franka_gazebo panda.launch x:=-0.5 \
+              world:=$(rospack find franka_gazebo)/world/stone.sdf \
+              controller:=cartesian_impedance_example_controller \
+              rviz:=true
+        ```
+      6. Launch the aruco_ros node to detect two markers simultaneously.
+        ```
+            roslaunch aruco_ros double.launch
+        ```
+      7. *TODO*  
+        * Add publishers `/aruco_simple/pixel1` and `/aruco_simple/pixel2` in `simple_double.cpp` for two markers centers in the image plane.
+        * Add code to test region control in robot grasping scene.
+        * Add code to test adaptive NN in robot grasping scene.
+
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
     * In scipy: `[x, y, z, w]`
