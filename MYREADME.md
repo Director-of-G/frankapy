@@ -188,6 +188,8 @@
         * Add code to test region control in robot grasping scene.
         * Add code to test adaptive NN in robot grasping scene.
 
+* **0607**
+    * 完成了`my_joint_region.py`.把原本`my_gzb_adaptive_control.py`中的data_collection删掉了，换上了实物的fa来替代其功能
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
     * In scipy: `[x, y, z, w]`
