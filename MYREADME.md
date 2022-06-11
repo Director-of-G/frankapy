@@ -190,6 +190,9 @@
 
 * **0607**
     * 完成了`my_joint_region.py`.把原本`my_gzb_adaptive_control.py`中的data_collection删掉了，换上了实物的fa来替代其功能
+
+* **0611**
+    * 完善了昨天的`my_cartesian_region.py`.但是发现效果一直不明显，要么就震荡。一般应该qrbound比qbound更大，之前yp设的参数会导致明显震荡。参数和效果记录在`log_parameters.odt`中
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
     * In scipy: `[x, y, z, w]`
