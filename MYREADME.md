@@ -126,10 +126,7 @@
         ```
       5. Launch the Franka Gazebo environment.
         ```
-            roslaunch franka_gazebo panda.launch x:=-0.5 \
-              world:=$(rospack find franka_gazebo)/world/stone.sdf \
-              controller:=joint_velocity_example_controller \
-              rviz:=true
+        roslaunch franka_gazebo panda.launch x:=-0.5 world:=$(rospack find franka_gazebo)/world/stone.sdf controller:=joint_velocity_example_controller rviz:=true
         ```
       6. Launch the frankapy controller in `./examples/gazebo/my_gzb_adaptive_control.py`. Make sure the test code `test_joint_space_region_control()` is not commented in main().
         ```
@@ -193,6 +190,15 @@
 
 * **0611**
     * 完善了昨天的`my_cartesian_region.py`.但是发现效果一直不明显，要么就震荡。一般应该qrbound比qbound更大，之前yp设的参数会导致明显震荡。参数和效果记录在`log_parameters.odt`中
+
+* **0617**
+    * 对于**0526**的*TODO*，1已经完成了，经过验证，图片显示的立方体框会往右偏大约200个像素，但是`/aruco_simple/pixel1`等topic中的数值是正确的数值。
+    * 需要写一个控制器，让它一开始就移到视野范围内.(finished)
+    * 相机内参的设定都写在`franka_description`下的`panda_gazebo.xacro`,但不是直接写内参矩阵，内参矩阵要通过`rostopic echo camera_info`来得到.
+* **0618**
+    * 完成了**0526**的*TODO*中的2的vision region验证部分。代码是`my_gzb_adaptive_control.py`中的`test_vision_joint_space_region_control`,数据和画图程序都放在`data/0618`
+    * `examples`文件夹下的带有`my_yxj_test`的都是我的随意测试的代码，没什么用，不用管它们
+
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
     * In scipy: `[x, y, z, w]`

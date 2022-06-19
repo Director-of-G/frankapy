@@ -3,6 +3,7 @@
     Copyright 2022 IRM Lab. All rights reserved.
 """
 import collections
+import logging
 from matplotlib.contour import ContourLabeler
 # from frankapy.franka_arm import FrankaArm
 import rospy
@@ -20,6 +21,7 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from my_utils import Quat, RadialBF
 from matplotlib import pyplot as plt
 from std_msgs.msg import Float64MultiArray
+from geometry_msgs.msg import PointStamped
 from matplotlib import pyplot as plt
 import pickle
 
@@ -80,7 +82,8 @@ class ImageSpaceRegion(object):
         fv = self.fv(x)
         return 0.5 * self.Kv * (1 - np.minimum(0, fv) ** 2)
     def kesi_x(self, x):  # x => (1, 2)
-        partial_fv = 2 * (x - self.x_d) / (self.b ** 2)
+        print(self.fv(x))
+        partial_fv = 2 * (x - self.x_d) / (self.b ** 2) if self.fv(x)<=0 else np.array([[0],[0]])
         partial_fv = partial_fv.reshape(1, -1)
         return - self.Kv * np.minimum(0, self.fv(x)) * partial_fv
 
@@ -226,7 +229,6 @@ class CartesianQuatSpaceRegion(object):
             theta = - (2 * math.pi - theta)
         return theta * axis_normalized.reshape(1, 3)
         
-
 class JointSpaceRegion(object):
     def __init__(self) -> None:
         self.single_kq = np.zeros((1, 0))
@@ -284,7 +286,7 @@ class JointSpaceRegion(object):
         fq_multi = fq_multi * self.multi_inout  # (1, n_multi)
         fqr_multi = fqr_multi * self.multi_inout  # (1, n_multi)
 
-        print(fq_single, fqr_single, fq_multi, fqr_multi)
+        # print(fq_single, fqr_single, fq_multi, fqr_multi)
 
         return fq_single.reshape(1, n_single), fqr_single.reshape(1, n_single), \
                 fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
@@ -327,7 +329,6 @@ class JointSpaceRegion(object):
         kesi_q = kesi_q * partial_f_q
 
         return kesi_q.reshape(1, -1)
-
 
 class AdaptiveImageJacobian(object):
     """
@@ -660,6 +661,9 @@ def test_cartesian_joint_space_region_control():
 
     f_quat_list, p_quat_list, quat_list = [], [], []
     dist_list = []
+    kesi_rall_list = []
+    time_list = []
+    position_list = []
     q_and_manipubility_list = np.zeros((0, 8))
     start_time = time.time()
 
@@ -701,24 +705,242 @@ def test_cartesian_joint_space_region_control():
             f_quat_list.append(controller_rq.fo(Quat(data_c.quat)))
             p_quat_list.append(controller_rq.Po(Quat(data_c.quat)))
             quat_list.append(data_c.quat.tolist())
-            if time.time() - start_time >= 60.0:
+            kesi_rall_list.append(kesi_rall)
+            position_list.append(p)
+            time_list.append(time.time()-start_time)
+            if time.time() - start_time >= 30.0:
                 break
 
-            print(kesi_r)
-            print(kesi_rq)
+            # print(kesi_r)
+            # print(kesi_rq)
         
         rate_.sleep()
     
     plt.figure()
     plt.subplot(1, 2, 1)
-    plt.plot(f_quat_list, color='b')
-    plt.plot(p_quat_list, color='r')
+    plt.plot(time_list, f_quat_list, color='b',label = 'f_quat')
+    plt.plot(time_list, p_quat_list, color='r',label = 'p_quat')
+    plt.title('f and p for quaternion')
+    plt.legend()
     plt.subplot(1, 2, 2)
-    plt.plot(quat_list)
+    plt.plot(time_list, quat_list)
+    plt.title('quaternion vs time')
+
+    plt.figure()
+    ax1 = plt.axes(projection='3d')
+    position_array  = np.array(position_list)
+    ax1.plot3D(position_array[:,0],position_array[:,1],position_array[:,2],label='traj')
+    ax1.scatter(position_array[0,0],position_array[0,1],position_array[0,2],c='r',label='initial')
+    ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
+    ax1.scatter(-0.01624475011413961, 0.5786721263542499, 0.30532807964440667,c='g',label='goal region center')
+    ax1.legend()
+    ax1.set_xlabel('x/m')
+    ax1.set_ylabel('y/m')
+    ax1.set_zlabel('z/m')
+    plt.title('executed trajectory 3D')
+
+    plt.figure()
+    plt.plot(time_list,np.reshape(kesi_rall_list,(np.shape(time_list)[0],-1)),label = 'kesi')
+    plt.legend()
+    plt.title('kesi for 6 dimensions')
+
+
     plt.show()
     info = {'dist': dist_list, \
             'q_and_manip': q_and_manipubility_list}
-    with open('./data/0521/q_and_manip.pkl', 'wb') as f:
+    with open('./data/0528/q_and_manip.pkl', 'wb') as f:
+        pickle.dump(info, f)
+
+# 0616 yxj
+def test_vision_joint_space_region_control():
+    class data_collection(object):
+        def __init__(self) -> None:
+            self.J = np.zeros((6, 7))
+            self.q = np.zeros((7,))
+            self.trans = np.zeros((3,))
+            self.quat = np.zeros((4,))
+            self.J_ready = False
+            self.q_ready = False
+            self.pose_ready = False
+            self.vision_1_ready = False
+            self.vision_2_ready = False
+            self.x1 = np.zeros((2,))
+            self.x2 = np.zeros((2,))
+
+        def zero_jacobian_callback(self, msg):
+            self.J = np.array(msg.data).reshape(6, 7)
+            if not self.J_ready:
+                self.J_ready = True
+
+        def joint_angles_callback(self, msg):
+            self.q = np.array(msg.data).reshape(7,)
+            if not self.q_ready:
+                self.q_ready = True
+
+        def pose_callback(self, msg):
+            self.trans = np.array(msg.data)[:3].reshape(3,)
+            self.quat = np.array(msg.data)[[6, 3, 4, 5]].reshape(4,)
+            if not self.pose_ready:
+                self.pose_ready = True
+
+        def vision_1_callback(self, msg):
+            self.x1 = np.array([msg.point.x,msg.point.y])
+            if not self.vision_1_ready:
+                self.vision_1_ready = True
+
+        def vision_2_callback(self, msg):
+            self.x2 = np.array([msg.point.x,msg.point.y])
+            if not self.vision_2_ready:
+                self.vision_2_ready = True
+
+        def is_data_without_vision_ready(self):
+            return self.J_ready & self.q_ready & self.pose_ready
+
+        def is_data_with_vision_ready(self):
+            return self.J_ready & self.q_ready & self.pose_ready & self.vision_1_ready & self.vision_2_ready
+
+    data_c = data_collection()
+    controller_j = JointSpaceRegion()
+    controller_r = CartesianSpaceRegion()
+    controller_rq = CartesianQuatSpaceRegion()
+    controller_x = ImageSpaceRegion(b=np.array([1920,1080]))
+    
+    nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
+    pub_ = rospy.Publisher('/gazebo_sim/joint_velocity_desired', Float64MultiArray, queue_size=10)
+    sub_J_ = rospy.Subscriber('/gazebo_sim/zero_jacobian', Float64MultiArray, data_c.zero_jacobian_callback, queue_size=1)
+    sub_q_ = rospy.Subscriber('/gazebo_sim/joint_angles', Float64MultiArray, data_c.joint_angles_callback, queue_size=1)
+    sub_ee_pose_ = rospy.Subscriber('/gazebo_sim/ee_pose', Float64MultiArray, data_c.pose_callback, queue_size=1)
+    sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
+    sub_vision_2_ = rospy.Subscriber('/aruco_simple/pixel2', PointStamped, data_c.vision_2_callback, queue_size=1)
+    rate_ = rospy.Rate(100)
+
+    # move to the place where the camera can see the ee aruco marker
+    target_joint = np.array([2.09541, 0.065632, 0.10139, -1.55448, 0.16644, 1.65392, 0.64225])
+    time_start1 = time.time()
+    while not rospy.is_shutdown():
+        if data_c.is_data_without_vision_ready():
+            time_start_this_loop = time.time()
+            q = data_c.q
+            # print('q',q)
+            # print('target',target_joint)
+            kp = 1
+            input = kp*(target_joint-q)
+            msg = Float64MultiArray()
+            msg.data = input.reshape(7,)
+            pub_.publish(msg)
+            # print('time consumption4: ', time.time() - time_start_this_loop)
+
+            if time.time() - time_start1 >= 6.0:
+                msg.data = [0,0,0,0,0,0,0]
+                pub_.publish(msg)
+                break
+
+    # init control scheme
+    if data_c.is_data_without_vision_ready():
+        controller_x.set_x_d(data_c.x2)
+        # controller_x.set_b(50)
+        controller_x.set_Kv(0.2)
+        print('vision region is set!')
+
+
+    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
+    q_and_manipubility_list = np.zeros((0, 8))
+
+    camera_intrinsic = np.array([3759.66467, 0.0, 960.5, 0.0, 3759.66467, 540.5, 0.0, 0.0, 1.0]).reshape((3,3))
+    fx = camera_intrinsic[0,0]
+    fy = camera_intrinsic[1,1]
+    u0 = camera_intrinsic[0,2]
+    v0 = camera_intrinsic[1,2]    
+    
+    R_c2b = np.array([[-math.sqrt(2)/2, -math.sqrt(2)/2,  0],
+    [-math.sqrt(2)/2, math.sqrt(2)/2,  0],
+    [0,  0, -1]])# this R is causually estimated by yxj, not carefully measured.
+    depth = 1
+
+    # print('Js',Js)
+
+    start_time = time.time() 
+    # update control scheme
+    while not rospy.is_shutdown():
+        q_and_m = np.zeros((1, 8))
+        q_and_m[0, :7] = data_c.q
+        q_and_m[0, 7] = math.sqrt(np.abs(np.linalg.det(data_c.J @ data_c.J.T)))
+
+        q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
+
+        kesi_x = controller_x.kesi_x(data_c.x1)
+        kesi_x = kesi_x.reshape((2,1))
+
+        J = data_c.J
+        J_pos = J[:3,:] # 3x7
+        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7x6)
+        J_pos_pinv = J_pos.T @ np.linalg.inv(J_pos @ J_pos.T) # 7x3
+        
+        u = data_c.x1[0]-u0
+        v = data_c.x1[1]-v0
+        Js = np.array([[fx/depth,0,u/depth],[0,fy/depth,v/depth]]) @ R_c2b # 2x3
+
+        # print("kesi_x",kesi_x)
+        # print("Js[:2,:].T",Js[:2,:].T)
+        # print("J_pos_pinv",J_pos_pinv)
+
+        dq_d_ = -J_pos_pinv @ (Js.T @ kesi_x)
+        msg = Float64MultiArray()
+        msg.data = dq_d_.reshape(7,)
+        pub_.publish(msg)
+
+        # logging
+        time_list.append(time.time()-start_time)
+        pixel_1_list.append(data_c.x1)
+        pixel_2_list.append(data_c.x2)
+        f_list.append(controller_x.fv(data_c.x1))
+        p_list.append(controller_x.Pv(data_c.x1))
+        kesi_x_list.append(kesi_x.reshape(2,))
+
+        if time.time() - start_time >= 30.0:
+            break
+
+            # print(kesi_r)
+            # print(kesi_rq)
+        
+        rate_.sleep()
+
+    pre_traj = './data/0618/'
+    
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(time_list, f_list, color='b',label = 'f')
+    plt.plot(time_list, p_list, color='r',label = 'P')
+    plt.title('f and P for vision region')
+    plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(time_list,kesi_x_list,label = 'kesi')
+    plt.title('kesi_x')
+    plt.savefig(pre_traj+'f_P_kesi_x.jpg')
+
+    plt.figure()
+    plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
+    plt.plot(time_list, pixel_2_list,color='r',label = 'desired position')
+    plt.legend()
+    plt.title('vision position vs time')
+    plt.savefig(pre_traj+'vision_position.jpg')
+
+    plt.figure()
+    plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b',label = 'vision trajectory')
+    plt.scatter(pixel_2_list[0][0], pixel_2_list[0][1],color='r',label = 'desired position')
+    plt.legend()
+    plt.title('vision trajectory')
+    plt.savefig(pre_traj+'vision_trajectory.jpg')
+
+    plt.show()
+    info = {'f_list': f_list, \
+            'p_list': p_list, \
+            'kesi_x_list': kesi_x_list, \
+            'pixel_1_list': pixel_1_list, \
+            'pixel_2_list': pixel_2_list, \
+            'time_list': time_list, \
+            'q_and_manipubility_list':q_and_manipubility_list}
+    with open('./data/0618/data.pkl', 'wb') as f:
         pickle.dump(info, f)
 
 
@@ -742,6 +964,25 @@ def plot_figures():
     plt.savefig('./data/0521/test_Cartesian_space_region.png', dpi=600)
     plt.show()
 
+def plot_figures2():
+    import pickle
+    with open('./data/0521/q_and_manip.pkl', 'rb') as f:
+        data1 = pickle.load(f)
+    # with open('./data/0521/q_and_manip.pkl', 'rb') as f:
+    #     data2 = pickle.load(f)
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(data1['q_and_manip'][:, :7], color='r')
+    # plt.plot(data2['q_and_manip'][:, :7], color='b')
+    plt.title('joint positions')
+    # plt.legend(['with jsr', 'with no jsr'])
+    plt.subplot(1, 2, 2)
+    plt.plot(data1['q_and_manip'][:, 7], color='r')
+    # plt.plot(data2['q_and_manip'][:, 7], color='b')
+    plt.title('manipubility')
+    # plt.legend(['with jsr', 'with no jsr'])
+    plt.savefig('./data/0521/test_Cartesian_space_region_0527.png', dpi=600)
+    plt.show()
 
 if __name__ == '__main__':
     # jsr = JointSpaceRegion()
@@ -776,6 +1017,7 @@ if __name__ == '__main__':
     # plt.show()
 
     # test_joint_space_region_control()
-    test_cartesian_joint_space_region_control()
-    # plot_figures()
+    # test_cartesian_joint_space_region_control()
+    # plot_figures2()
     
+    test_vision_joint_space_region_control()
