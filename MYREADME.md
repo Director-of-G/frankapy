@@ -195,9 +195,12 @@
     * 对于**0526**的*TODO*，1已经完成了，经过验证，图片显示的立方体框会往右偏大约200个像素，但是`/aruco_simple/pixel1`等topic中的数值是正确的数值。
     * 需要写一个控制器，让它一开始就移到视野范围内.(finished)
     * 相机内参的设定都写在`franka_description`下的`panda_gazebo.xacro`,但不是直接写内参矩阵，内参矩阵要通过`rostopic echo camera_info`来得到.
+    注意目前启动gazebo环境的指令是```roslaunch franka_gazebo panda.launch x:=-0.5 world:=$(rospack find franka_gazebo)/world/stone.sdf controller:=joint_velocity_example_controller rviz:=true```
 * **0618**
     * 完成了**0526**的*TODO*中的2的vision region验证部分。代码是`my_gzb_adaptive_control.py`中的`test_vision_joint_space_region_control`,数据和画图程序都放在`data/0618`
     * `examples`文件夹下的带有`my_yxj_test`的都是我的随意测试的代码，没什么用，不用管它们
+* **0623**
+    * 在`my_gzb_adaptive_control.py`中新增了两个类：`MyConstantsSim`和`AdaptiveImageJacobianSim`。对于原来的`AdaptiveImageJacobian`，个人感觉里面不应该放各种`region control`控制器，于是新建了针对仿真中`Js`更新的`AdaptiveImageJacobianSim`.测试代码是函数`test_adaptive_region_control()`
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!

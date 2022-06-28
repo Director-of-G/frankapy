@@ -3,6 +3,7 @@
     Copyright 2022 IRM Lab. All rights reserved.
 """
 
+from tokenize import Double
 import numpy as np
 import math
 
@@ -132,20 +133,34 @@ class RadialBF(object):  # radial basis function(RBF) class
         for col in range(permute_idx.shape[1]):
             permute_idx[:, col] = np.tile(np.repeat(np.arange(self.n_k_per_dim), self.n_k_per_dim ** (self.n_dim - col - 1)), self.n_k_per_dim ** col)
 
+        # print(rbf_c)
+        # print(permute_idx)
         for order, idx in enumerate(permute_idx):
-            self.rbf_c_[:, order] = rbf_c[np.arange(self.n_dim), idx.reshape(-1,).tolist()]
+            self.rbf_c_[order,:] = rbf_c[np.arange(self.n_dim), idx.astype(int).reshape(-1,).tolist()]
+
+        # print(self.rbf_c_)
 
         self.rbf_c_ = self.rbf_c_.reshape(self.n_k, self.n_dim)
-        if len(self.sigma.shape) == 1:
+        # print(self.rbf_c_)
+
+        if isinstance(self.sigma,int) or isinstance(self.sigma,float):
             self.rbf_sigma2_ = np.array([self.sigma ** 2]).repeat(self.n_k).reshape(-1, 1)  # (n_k, 1)
         else:
             self.rbf_sigma2_ = np.array(self.sigma) ** 2
 
     def get_rbf_(self, r):
         r = r.reshape(1, 3)
-        return np.exp(-(np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2) / (2 * self.rbf_sigma2_)).reshape(-1, 1)
+        # print(r - self.rbf_c_)
+        # print((np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2).shape)
+        # print((2 * self.rbf_sigma2_).reshape(-1).shape)
+        return np.exp(-np.divide((np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2),(2 * self.rbf_sigma2_).reshape(-1)))
 
 
 if __name__ == '__main__':
-    import pdb
-    pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
+
+    cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.1,0.9],[-0.5,0.5],[0,1]])}
+    rbf = RadialBF(cfg=cfg)
+    rbf.init_rbf_()
+    a = rbf.get_rbf_(np.array([0.5,0,0.5]))
