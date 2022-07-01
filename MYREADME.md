@@ -209,20 +209,6 @@
             * 现在想到的办法是让第一二个link尽量面向正前方？
         * 相机识别有几个瞬间会不准
             * 需要换大一点的`aruco`码
-* **0701**
-    * 完成ANN+vision+Cartesian region在Gazebo中的验证
-    * 跑出一组参数，在有ANN和无ANN生效的情况下，结果有明显对比
-    * 参数如下：
-      * 3个维度上RBF中心的取值范围：[[-0.3, 0.7], [-0.3, 0.7], [0, 1]] (每维10个；现在的取值范围偏大，尝试让取值范围缩小到FOV中，效果不好，收敛但有静差)
-      * 3个维度上RBF中心$\sigma$的值：1(若取$\sigma=\frac{D}{\sqrt{K}}$，让相邻RBF的overlap不超过1倍$\sigma$，效果不好，收敛速度略慢于无RNN情形，但也有超调)
-      * 目前初始的$J_s$给的是有偏差的，其中参数$f_x=3759.66467+200,f_y=3759.66467-200,u_0=960.5-50,v_0=540.5+50$，但原始的$J_s$本就不精确(它的假设是marker中心位于夹爪中心，但仿真和实物都有offset，不过利用目前不精确的$J_s$，实验效果还可以)
-    * 代码在./gazebo/my_gzb_adaptive_control.py中的test_adaptive_region_control函数
-      * 唯一参数allow_update=True/False，表示是否运用ANN更新参数
-      * 在main中运行test_adaptive_region_control即可(默认不使用ANN)，需要开gazebo环境和aruco_ros
-    * 目前的对比效果是
-      * 使用ANN，收敛较慢，但几乎无超调
-      * 不使用ANN，收敛较快，超调明显
-    * 数据在`./data/0630`下，`./with adaptive`和`./with no adaptive`两个文件夹分别包含使用ANN和不使用ANN下的实验结果，能够看到上述对比效果。运行test_adaptive_region_control，会绘图显示更新后的权重矩阵$W$，并在`./data/0630`中给出`data_with_adaptive.pkl`和`data_with_no_adaptive.pkl`文件记录数据，注意修改存放记录的文件夹名称。
 
 * **0630**
     * 改了`ws_franka`里面的`double.launch`及其相关源文件。现在机械臂上的码是99，目标码是485.
@@ -238,6 +224,23 @@
         (in environment py36)
         python examples/my_precise_control.py
         ```
+
+* **0701**
+    * 完成ANN+vision+Cartesian region在Gazebo中的验证
+    * 跑出一组参数，在有ANN和无ANN生效的情况下，结果有明显对比
+    * 参数如下：
+      * 3个维度上RBF中心的取值范围：[[-0.3, 0.7], [-0.3, 0.7], [0, 1]] (每维10个；现在的取值范围偏大，尝试让取值范围缩小到FOV中，效果不好，收敛但有静差)
+      * 3个维度上RBF中心$\sigma$的值：1(若取$\sigma=\frac{D}{\sqrt{K}}$，让相邻RBF的overlap不超过1倍$\sigma$，效果不好，收敛速度略慢于无RNN情形，但也有超调)
+      * 目前初始的$J_s$给的是有偏差的，其中参数$f_x=3759.66467+200,f_y=3759.66467-200,u_0=960.5-50,v_0=540.5+50$，但原始的$J_s$本就不精确(它的假设是marker中心位于夹爪中心，但仿真和实物都有offset，不过利用目前不精确的$J_s$，实验效果还可以)
+    * 代码在./gazebo/my_gzb_adaptive_control.py中的test_adaptive_region_control函数
+      * 唯一参数allow_update=True/False，表示是否运用ANN更新参数
+      * 在main中运行test_adaptive_region_control即可(默认不使用ANN)，需要开gazebo环境和aruco_ros
+    * 目前的对比效果是
+      * 使用ANN，收敛较慢，但几乎无超调
+      * 不使用ANN，收敛较快，超调明显
+    * 数据在`./data/0701`下，`./with adaptive`和`./with no adaptive`两个文件夹分别包含使用ANN和不使用ANN下的实验结果，能够看到上述对比效果。运行test_adaptive_region_control，会绘图显示更新后的权重矩阵$W$，并在`./data/0701`中给出`data_with_adaptive.pkl`和`data_with_no_adaptive.pkl`文件记录数据，注意修改存放记录的文件夹名称。
+
+
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!

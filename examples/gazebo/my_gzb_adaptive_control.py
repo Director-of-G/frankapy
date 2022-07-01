@@ -1329,7 +1329,7 @@ def test_adaptive_region_control(allow_update=False):
         
         rate_.sleep()
 
-    pre_traj = './data/0630/'
+    pre_traj = './data/0701/'
     
     # vision part
     plt.figure()
@@ -1403,7 +1403,7 @@ def test_adaptive_region_control(allow_update=False):
             'kesi_rall_list':kesi_rall_list,\
             'position_list':position_list, \
             'adaptive_weight_matrix':controller_adaptive.W_hat}
-    with open('./data/0630/data_withno_adaptive.pkl', 'wb') as f:
+    with open('./data/0701/data_withno_adaptive.pkl', 'wb') as f:
         pickle.dump(info, f)
 
 
@@ -1449,9 +1449,9 @@ def plot_figures2():
 
 def plot_figures3():
     import pickle
-    with open('./data/0630/data_with_adaptive.pkl', 'rb') as f:
+    with open('./data/0701/data_with_adaptive.pkl', 'rb') as f:
         data1 = pickle.load(f)
-    with open('./data/0630/data_withno_adaptive.pkl', 'rb') as f:
+    with open('./data/0701/data_withno_adaptive.pkl', 'rb') as f:
         data2 = pickle.load(f)
     desired_position_bias = np.array([240, 160])
     plt.figure()
@@ -1483,7 +1483,7 @@ def plot_figures3():
 
     plt.title('vision trajectory')
     plt.legend(['with adaptive', 'with no adaptive'])
-    plt.savefig('./data/0630/test_Cartesian_space_region.png', dpi=600)
+    plt.savefig('./data/0701/test_Cartesian_space_region.png', dpi=600)
     plt.show()
 
 if __name__ == '__main__':
