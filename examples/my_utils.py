@@ -157,10 +157,11 @@ class RadialBF(object):  # radial basis function(RBF) class
 
 
 if __name__ == '__main__':
-    # import pdb
+    import pdb
     # pdb.set_trace()
 
     cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.1,0.9],[-0.5,0.5],[0,1]])}
     rbf = RadialBF(cfg=cfg)
     rbf.init_rbf_()
+    pdb.set_trace()
     a = rbf.get_rbf_(np.array([0.5,0,0.5]))

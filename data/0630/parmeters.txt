@@ -1,0 +1,9 @@
+if x is None:
+                # raise ValueError('Target point x on the image plane should not be empty!')
+                x = np.array([1920/2,1080/2])
+            fx, fy = MyConstantsSim.FX_HAT + 200, MyConstantsSim.FY_HAT - 200
+            u0, v0 = MyConstantsSim.U0 - 50, MyConstantsSim.V0 + 50
+            u, v = x[0] - u0, x[1] - v0
+            z = 1
+            J_cam2img = np.array([[fx/z, 0, -u/z, -u*v/fx, (fx+u**2)/fx, -v], \
+                                  [0, fy/z, -v/z, -(fy+v**2)/fy, u*v/fy, u]])

@@ -7,7 +7,8 @@ import logging
 from matplotlib.contour import ContourLabeler
 # from frankapy.franka_arm import FrankaArm
 import rospy
-import tf
+from pathlib import Path
+# import tf
 
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -18,6 +19,7 @@ import pdb
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
+print(sys.path)
 from my_utils import Quat, RadialBF
 from matplotlib import pyplot as plt
 from std_msgs.msg import Float64MultiArray
@@ -212,6 +214,7 @@ class CartesianQuatSpaceRegion(object):
         J_rot_matBC = np.dot(np.array(J_rot_matBC), np.array([math.acos(norm_r_o/2)/(2*norm_r_o**2), math.sin(norm_r_o/2)/(norm_r_o**3)]))
         pass
 
+    # deprecated (only valid when the last 3 dimensions in x_dot are represented in axis-angle form)
     def kesi_rq(self, q:np.ndarray):  # q => (4,)
         q, q_g = Quat(q).unit_(), self.q_g.unit_()
         q_o, q_g_inv = q.quat, q_g.inverse_().quat
@@ -378,7 +381,7 @@ class AdaptiveImageJacobian(object):
             z = 1
             J_cam2img = np.array([[fx/z, 0, -u/z, -u*v/fx, (fx+u**2)/fx, -v], \
                                   [0, fy/z, -v/z, -(fy+v**2)/fy, u*v/fy, u]])
-            my_jacobian_handler = MyJacobianHandler()
+            my_jacobian_handler = ()
             J_base2cam = my_jacobian_handler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
             
             rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
@@ -488,6 +491,7 @@ class AdaptiveRegionControllerSim(object):
         if fa is None:
             # raise ValueError('FrankaArm handle is not provided!')
             print('-------simulation-------')
+            self.fa = None
         else:
             self.fa = fa
 
@@ -509,20 +513,28 @@ class AdaptiveRegionControllerSim(object):
             if x is None:
                 # raise ValueError('Target point x on the image plane should not be empty!')
                 x = np.array([1920/2,1080/2])
-            fx, fy = MyConstantsSim.FX_HAT, MyConstantsSim.FY_HAT
-            u0, v0 = MyConstantsSim.U0, MyConstantsSim.V0
+            fx, fy = MyConstantsSim.FX_HAT + 200, MyConstantsSim.FY_HAT - 200
+            u0, v0 = MyConstantsSim.U0 - 50, MyConstantsSim.V0 + 50
             u, v = x[0] - u0, x[1] - v0
             z = 1
-            J_cam2img = np.array([[fx/z, 0, -u/z, -u*v/fx, (fx+u**2)/fx, -v], \
-                                  [0, fy/z, -v/z, -(fy+v**2)/fy, u*v/fy, u]])
+            """
+                This Js seems wrong
+            """
+            # J_cam2img = np.array([[fx/z, 0,    -u/z, -u*v/fx,      (fx+u**2)/fx, -v], \
+            #                       [0,    fy/z, -v/z, -(fy+v**2)/fy, u*v/fy,       u]])
+            """
+                This Js seems right
+            """
+            J_cam2img = np.array([[fx/z, 0,    -u/z, 0, 0, 0], \
+                                  [0,    fy/z, -v/z, 0, 0, 0]])
 
-            # my_jacobian_handler = MyJacobianHandler()
+            # my_jacobian_handler = ()
             # J_base2cam = my_jacobian_handler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
             # print(J_base2cam)
 
             R_c2b = np.array([[-math.sqrt(2)/2, -math.sqrt(2)/2,  0],
-                [-math.sqrt(2)/2, math.sqrt(2)/2,  0],
-                [0,  0, -1]])# this R is causually estimated by yxj, not carefully measured.
+                              [-math.sqrt(2)/2,  math.sqrt(2)/2,  0],
+                              [0,                0,              -1]])# this R is causually estimated by yxj, not carefully measured.
             J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
             # print('J_base2cam',J_base2cam)
             
@@ -539,7 +551,7 @@ class AdaptiveRegionControllerSim(object):
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            L = np.eye(1000)
+            self.L = np.eye(1000) * 5000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -547,10 +559,11 @@ class AdaptiveRegionControllerSim(object):
                 raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
             self.W_hat = W_hat
         else:
-            W_hat = np.zeros((2*6,1000)) # initial all w are zeros
+            self.W_hat = np.zeros((2*6,1000)) # initial all w are zeros
             # raise ValueError('Matrix W_hat should not be empty!')
+        self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
 
-        cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.1,0.9],[-0.5,0.5],[0,1]])}
+        cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.3,0.7],[-0.3,0.7],[0,1]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
@@ -559,12 +572,14 @@ class AdaptiveRegionControllerSim(object):
         self.cartesian_space_region = CartesianSpaceRegion()
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         # self.cartesian_space_region.set_r_c(np.array([-0.01624475011413961, 0.5786721263542499, 0.30532807964440667]))  # grasping pose on the right
-        self.cartesian_space_region.set_r_c(np.array([-0.0068108842682527, 0.611158320250102, 0.5342875493162069]))
-        self.cartesian_space_region.set_c(np.array([0.02, 0.02, 0.02]).reshape(1, 3))
-        self.cartesian_space_region.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
+        # self.cartesian_space_region.set_r_c(np.array([-0.0068108842682527, 0.611158320250102, 0.5342875493162069]))  # set by yxj
+        self.cartesian_space_region.set_r_c(np.array([-0.0011823860573642849, 0.43430624374805804, 0.569872105919327]))  # set by jyp | grasping pose above the second object with marker
+        self.cartesian_space_region.set_c(np.array([0.05, 0.05, 0.05]).reshape(1, 3))
+        self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
 
-        self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
-        self.cartesian_quat_space_region.set_Ko(15)
+        # self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # set by yxj | grasping pose on the right
+        self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
+        self.cartesian_quat_space_region.set_Ko(60)
 
 
         self.joint_space_region = JointSpaceRegion()
@@ -581,7 +596,7 @@ class AdaptiveRegionControllerSim(object):
         return self.cartesian_space_region.kesi_r(r.reshape(1, -1))
 
     def kesi_rq(self, rq):
-        return self.cartesian_quat_space_region.kesi_rq(Quat(rq.reshape(-1,)))
+        return self.cartesian_quat_space_region.kesi_rq_omega(rq.reshape(-1,)) / 2
 
     def kesi_q(self, q):
         return self.joint_space_region.kesi_q(q.reshape(1, 7))
@@ -592,7 +607,7 @@ class AdaptiveRegionControllerSim(object):
     def get_Js_hat(self):
         return self.Js_hat
 
-    def get_u(self,J,d,r_t,r_o,q,x):
+    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False):
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
@@ -607,38 +622,71 @@ class AdaptiveRegionControllerSim(object):
 
         kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
 
-        u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
+        if with_vision:
+            u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
+            # Js_hat_pinv = self.Js_hat.T @ np.linalg.inv(self.Js_hat @ self.Js_hat.T)  # try pseudo inverse of Js
+            # u = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
+        else:
+            u = - J_pinv @ (kesi_rall + J @ kesi_q)
+
+        # print('kesi_x', kesi_x)
+        # print('kesi_rall', kesi_rall)
+        # print('u_image_part', (- J_pinv @ (self.Js_hat.T @ kesi_x)).reshape(-1,))
+        # print('u_cartesian_part', (- J_pinv @ kesi_rall).reshape(-1,))
+        # print('u_joint_part', (- J_pinv @ (J_pinv.T @ kesi_q)).reshape(-1,))
         return u
 
-    def update(self): # used when adaptive, if u are precise, don't use it
-        r = self.fa.get_pose()  # get r: including translation and rotation matrix
-        q = self.fa.get_joints()  # get q: joint angles
+    def update(self, J=None, r_t=None, r_o=None, q=None, x=None): # used when adaptive, if u are precise, don't use it
+        if self.fa is not None:
+            r = self.fa.get_pose()  # get r: including translation and rotation matrix
+            q = self.fa.get_joints()  # get q: joint angles
+            # split Cartesian translation and quaternion
+            r_tran = r.translation
+            r_quat = r.quaternion  # w, x, y, z
+            # get the analytic jacobian (6*7)
+            J = self.fa.get_jacobian(q)
+        else:
+            r_tran = r_t
+            r_quat = r_o
+            # J, q and x are passed through parameters
 
-        # split Cartesian translation and quaternion
-        r_tran = r.translation
-        r_quat = r.quaternion  # w, x, y, z
-
-        theta = self.get_theta(r_tran)  # get the neuron values theta(r) (1000*1)
-        J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
-        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
-        J_rot = Quat(r_quat).jacobian_rel2_axis_angle_()  # get the jacobian (partial p / partial r_o^T) (4, 3)
+        theta = self.get_theta(r_tran).reshape(-1, 1)  # get the neuron values theta(r) (1000*1)
+        if not self.W_init_flag:
+            """
+                Initial Method #1
+            """
+            # self.W_hat[:, 0] = self.Js_hat.reshape(-1,) / theta[0]
+            """
+                Initial Method #2
+            """
+            # self.W_hat = np.random.rand(12, 1000)
+            """
+                Initial Method #3
+            """
+            for r_idx in range(self.W_hat.shape[0]):
+                self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
+            self.W_init_flag = True
         
-        kesi_x = self.kesi_x().reshape(-1, 1)  # (2, 1)
-        kesi_rt = self.kesi_r().reshape(-1, 1)  # (3, 1)
-        kesi_rq = self.kesi_rq() @ J_rot  # (1, 4) @ (4, 3) = (1, 3)
-        kesi_r = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
-        kesi_q = self.kesi_q().reshape(-1, 1)  # (7, 1)
+        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        
+        kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
+        kesi_rt = self.kesi_r(r_tran).reshape(-1, 1)  # (3, 1)
+        kesi_rq = self.kesi_rq(r_quat)  # (1, 4) @ (4, 3) = (1, 3)
+        kesi_rall = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
+        kesi_q = self.kesi_q(q).reshape(-1, 1)  # (7, 1)
 
         kesi_x_prime = np.c_[kesi_x[0] * np.eye(6), kesi_x[1] * np.eye(6)]  # (6, 12)
 
-        dW_hat = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T  # (1000, 6)
+        dW_hat = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T  # (1000, 6)
         dW_hat = dW_hat @ kesi_x_prime  # (1000, 12)
 
         self.W_hat = self.W_hat + dW_hat.T
 
         # update J_s
         temp_Js_hat = self.W_hat @ theta  # (12, 1)
+        # np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T
         self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
+        print((self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T)
 
 class JointOutputRegionControl(object):
     # def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
@@ -821,7 +869,8 @@ def test_cartesian_joint_space_region_control():
     # init control scheme
     # controller_r.set_r_c(np.array([-0.4274491954570557, 0.17649338322602143, 0.0877387993047109]).reshape(1, 3))
     # controller_r.set_r_c(np.array([0.30705422269100857, -7.524700079232461e-06, 0.4870834722065375]))  # starting point
-    controller_r.set_r_c(np.array([-0.01624475011413961, 0.5786721263542499, 0.30532807964440667]))  # grasping pose on the right
+    # controller_r.set_r_c(np.array([-0.01624475011413961, 0.5786721263542499, 0.30532807964440667]))  # grasping pose on the right
+    controller_r.set_r_c(np.array([-0.00046233226943146605, 0.4572876569970451, 0.4897459710192101]))  # grasping pose above the second object with marker
     controller_r.set_c(np.array([0.01, 0.01, 0.01]).reshape(1, 3))
     controller_r.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
 
@@ -829,7 +878,8 @@ def test_cartesian_joint_space_region_control():
     # controller_rq.set_q_g(np.array([0.0004200682001275777, 0.9028032461428314, -0.00021468888469159875, -0.4300479986956025]))  # rot_Y(-90)
     # controller_rq.set_q_g(np.array([0.0005740008069370812, 0.708744905485196, -0.7054320813712253, 0.00603014709058085]))  # rot_Z(+90)
     # controller_rq.set_q_g(np.array([0.5396668336145884, -0.841829320383993, 0.00250734600652218, -0.008486521399793301]))  # rot_X(+90)
-    controller_rq.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
+    # controller_rq.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
+    controller_rq.set_q_g(np.array([-0.16181711157880402, 0.6981663251376432, 0.6773967396126247, 0.16584134878475798]))  # grasping pose above the second object with marker
     controller_rq.set_Ko(15)
     
     nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
@@ -877,7 +927,8 @@ def test_cartesian_joint_space_region_control():
             J = data_c.J
             J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
             
-            dq_d_ = -J_pinv @ (kesi_rall + J @ kesi_q)
+            # dq_d_ = -J_pinv @ (kesi_rall + J @ kesi_q)
+            dq_d_ = -J_pinv @ kesi_rall
             msg = Float64MultiArray()
             msg.data = dq_d_.reshape(7,)
             pub_.publish(msg)
@@ -995,10 +1046,13 @@ def test_vision_joint_space_region_control():
     rate_ = rospy.Rate(100)
 
     # move to the place where the camera can see the ee aruco marker
-    target_joint = np.array([2.09541, 0.065632, 0.10139, -1.55448, 0.16644, 1.65392, 0.64225])
+    target_joint = np.array([0.79083, -0.78804, 0.35310, -2.43173, 0.51854, 2.02235, 0.12722])  # exactly on the right
+    # target_joint = np.array([2.09541, 0.065632, 0.10139, -1.55448, 0.16644, 1.65392, 0.64225])  # on the right behind
+    target_quat = np.array([-0.16182, 0.69817, 0.67740, 0.16584])  # grasping pose
     time_start1 = time.time()
     while not rospy.is_shutdown():
         if data_c.is_data_without_vision_ready():
+            rospy.loginfo('Data with vision info has been prepared yet!')
             time_start_this_loop = time.time()
             q = data_c.q
             # print('q',q)
@@ -1016,11 +1070,14 @@ def test_vision_joint_space_region_control():
                 break
 
     # init control scheme
+    controller_rq.set_q_g(target_quat)
+    controller_rq.set_Ko(100)
+    print('Cartesian quaternion region is set!')
     if data_c.is_data_without_vision_ready():
-        controller_x.set_x_d(data_c.x2)
+        controller_x.set_x_d(data_c.x2 - np.array([0, 100]))
         # controller_x.set_b(50)
         controller_x.set_Kv(0.2)
-        print('vision region is set!')
+        print('Vision region is set!')
 
 
     f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
@@ -1048,6 +1105,14 @@ def test_vision_joint_space_region_control():
 
         q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
 
+        # get all kesi from controllers
+        if controller_rq.fo(Quat(data_c.quat)) <= 0:
+            kesi_rq = np.zeros((1, 3))
+        else:
+            kesi_rq = controller_rq.kesi_rq_omega(data_c.quat) / 2 # (1, 3)
+        kesi_r = np.zeros((1, 3))  # (1, 3)
+        kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
+
         kesi_x = controller_x.kesi_x(data_c.x1)
         kesi_x = kesi_x.reshape((2,1))
 
@@ -1064,7 +1129,7 @@ def test_vision_joint_space_region_control():
         # print("Js[:2,:].T",Js[:2,:].T)
         # print("J_pos_pinv",J_pos_pinv)
 
-        dq_d_ = -J_pos_pinv @ (Js.T @ kesi_x)
+        dq_d_ = -J_pos_pinv @ (Js.T @ kesi_x) - J_pinv @ kesi_rall
         msg = Float64MultiArray()
         msg.data = dq_d_.reshape(7,)
         pub_.publish(msg)
@@ -1169,8 +1234,10 @@ def test_adaptive_region_control():
         def is_data_without_vision_1_ready(self):
             return self.J_ready & self.q_ready & self.pose_ready & self.vision_2_ready
 
-        def is_data_with_vision_ready(self):
+        def is_data_with_vision_1_ready(self):
             return self.J_ready & self.q_ready & self.pose_ready & self.vision_1_ready & self.vision_2_ready
+
+    desired_position_bias = -np.array([240, 160])
 
     data_c = data_collection()
     controller_adaptive = AdaptiveRegionControllerSim()
@@ -1187,13 +1254,12 @@ def test_adaptive_region_control():
     # init control scheme
     while 1:
         if data_c.is_data_without_vision_1_ready():
-            controller_adaptive.image_space_region.set_x_d(data_c.x2)
+            controller_adaptive.image_space_region.set_x_d(data_c.x2 + desired_position_bias)
             # print("1111",controller_adaptive.image_space_region.x_d)
             # controller_adaptive.image_space_region.set_b(50)
             controller_adaptive.image_space_region.set_Kv(0.2)
             print('vision region is set!')
             break
-
 
     f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
     q_and_manipubility_list = np.zeros((0, 8))
@@ -1219,7 +1285,17 @@ def test_adaptive_region_control():
 
         d = np.array([[0],[0],[0],[0],[0],[0]])
 
-        dq_d_ = controller_adaptive.get_u(J,d,data_c.trans,data_c.quat,data_c.q,data_c.x1)
+        """
+            unless the marker attached to gripper is seen
+            donnot update Js and exclude it from calculating dq_d_
+        """
+        if data_c.is_data_with_vision_1_ready():
+            dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True)
+            controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1)
+        else:
+            dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=False)
+        print('Js: ', controller_adaptive.Js_hat)
+
         msg = Float64MultiArray()
         msg.data = dq_d_.reshape(7,)
         pub_.publish(msg)
@@ -1227,7 +1303,7 @@ def test_adaptive_region_control():
         # logging
         time_list.append(time.time()-start_time)
         pixel_1_list.append(data_c.x1)
-        pixel_2_list.append(data_c.x2)
+        pixel_2_list.append(data_c.x2 + desired_position_bias)
         f_list.append(controller_adaptive.image_space_region.fv(data_c.x1))
         p_list.append(controller_adaptive.image_space_region.Pv(data_c.x1))
         kesi_x_list.append(controller_adaptive.image_space_region.kesi_x(data_c.x1).reshape((-1,)))
@@ -1238,7 +1314,9 @@ def test_adaptive_region_control():
         kesi_rall_list.append(controller_adaptive.kesi_rall)
         position_list.append(data_c.trans)
 
-        if time.time() - start_time >= 30.0:
+        if time.time() - start_time >= 40.0:
+            plt.imshow((controller_adaptive.W_hat - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)) / (np.max(controller_adaptive.W_hat, axis=1).reshape(-1, 1) - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)))
+            plt.show()
             break
 
             # print(kesi_r)
@@ -1246,7 +1324,7 @@ def test_adaptive_region_control():
         
         rate_.sleep()
 
-    pre_traj = './data/0623/'
+    pre_traj = './data/0630/'
     
     # vision part
     plt.figure()
@@ -1318,8 +1396,9 @@ def test_adaptive_region_control():
             'f_quat_list':f_quat_list,\
             'p_quat_list':p_quat_list,\
             'kesi_rall_list':kesi_rall_list,\
-            'position_list':position_list}
-    with open('./data/0623/data.pkl', 'wb') as f:
+            'position_list':position_list, \
+            'adaptive_weight_matrix':controller_adaptive.W_hat}
+    with open('./data/0630/data_withno_adaptive.pkl', 'wb') as f:
         pickle.dump(info, f)
 
 
@@ -1361,6 +1440,45 @@ def plot_figures2():
     plt.title('manipubility')
     # plt.legend(['with jsr', 'with no jsr'])
     plt.savefig('./data/0521/test_Cartesian_space_region_0527.png', dpi=600)
+    plt.show()
+
+def plot_figures3():
+    import pickle
+    with open('./data/0630/data_with_adaptive.pkl', 'rb') as f:
+        data1 = pickle.load(f)
+    with open('./data/0630/data_withno_adaptive.pkl', 'rb') as f:
+        data2 = pickle.load(f)
+    desired_position_bias = np.array([240, 160])
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    pixel_1_list, pixel_2_list = data1['pixel_1_list'], data1['pixel_2_list']
+    pdb.set_trace()
+    plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b', alpha=0.75)
+    plt.scatter(pixel_2_list[0][0] - desired_position_bias[0], pixel_2_list[0][1] - desired_position_bias[1],color='b',label = 'desired position', alpha=0.75)
+    
+    # plot pixels every extract_interval
+    extract_interval = 100
+    extract_index = np.arange(0, len(pixel_1_list), extract_interval)
+    extract_point = np.zeros((0, 2))
+    for index in extract_index:
+        extract_point = np.concatenate((extract_point, pixel_1_list[index].reshape(1, 2)), axis=0)
+    plt.scatter(extract_point[:, 0], extract_point[:, 1], marker='x', color='b', alpha=0.5)
+
+    pixel_1_list, pixel_2_list = data2['pixel_1_list'], data2['pixel_2_list']
+    plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='r', alpha=0.75)
+    plt.scatter(pixel_2_list[0][0] - desired_position_bias[0], pixel_2_list[0][1] - desired_position_bias[1],color='r',label = 'desired position', alpha=0.75)
+
+    # plot pixels every extract_interval
+    extract_interval = 100
+    extract_index = np.arange(0, len(pixel_1_list), extract_interval)
+    extract_point = np.zeros((0, 2))
+    for index in extract_index:
+        extract_point = np.concatenate((extract_point, pixel_1_list[index].reshape(1, 2)), axis=0)
+    plt.scatter(extract_point[:, 0], extract_point[:, 1], marker='x', color='r', alpha=0.5)
+
+    plt.title('vision trajectory')
+    plt.legend(['with adaptive', 'with no adaptive'])
+    plt.savefig('./data/0630/test_Cartesian_space_region.png', dpi=600)
     plt.show()
 
 if __name__ == '__main__':
@@ -1405,3 +1523,4 @@ if __name__ == '__main__':
     # yxj 20220623
     # nh_ = rospy.init_node('joint_space_region_testbench', anonymous=True)
     test_adaptive_region_control()
+    # plot_figures3()
