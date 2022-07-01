@@ -186,7 +186,7 @@
         * Add code to test adaptive NN in robot grasping scene.
 
 * **0607**
-    * 完成了`my_joint_region.py`.把原本`my_gzb_adaptive_control.py`中的data_collection删掉了，换上了实物的fa来替代其功能
+    * 完成了`my_joint_region.py`.是从`my_gzb_adaptive_control.py`复制过去改的，把原本`my_gzb_adaptive_control.py`中的data_collection删掉了，换上了实物的fa来替代其功能
 
 * **0611**
     * 完善了昨天的`my_cartesian_region.py`.但是发现效果一直不明显，要么就震荡。一般应该qrbound比qbound更大，之前yp设的参数会导致明显震荡。参数和效果记录在`log_parameters.odt`中
@@ -223,6 +223,21 @@
       * 使用ANN，收敛较慢，但几乎无超调
       * 不使用ANN，收敛较快，超调明显
     * 数据在`./data/0630`下，`./with adaptive`和`./with no adaptive`两个文件夹分别包含使用ANN和不使用ANN下的实验结果，能够看到上述对比效果。运行test_adaptive_region_control，会绘图显示更新后的权重矩阵$W$，并在`./data/0630`中给出`data_with_adaptive.pkl`和`data_with_no_adaptive.pkl`文件记录数据，注意修改存放记录的文件夹名称。
+
+* **0630**
+    * 改了`ws_franka`里面的`double.launch`及其相关源文件。现在机械臂上的码是99，目标码是485.
+    * 完成了`my_precise_control.py`.数据存在文件夹`0630`中.跑之前记得打开相机：
+        ```
+        (in workspace ws_franka)
+        roslaunch pylon_camera pylon_camera_node.launch 
+        roslaunch aruco_ros double.launch
+        rosrun rqt_image_view rqt_image_view 
+
+        (in frankapy)
+        bash bash_scripts/start_control_pc.sh -i localhost
+        (in environment py36)
+        python examples/my_precise_control.py
+        ```
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
