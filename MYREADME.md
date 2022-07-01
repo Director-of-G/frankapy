@@ -186,7 +186,7 @@
         * Add code to test adaptive NN in robot grasping scene.
 
 * **0607**
-    * 完成了`my_joint_region.py`.把原本`my_gzb_adaptive_control.py`中的data_collection删掉了，换上了实物的fa来替代其功能
+    * 完成了`my_joint_region.py`.是从`my_gzb_adaptive_control.py`复制过去改的，把原本`my_gzb_adaptive_control.py`中的data_collection删掉了，换上了实物的fa来替代其功能
 
 * **0611**
     * 完善了昨天的`my_cartesian_region.py`.但是发现效果一直不明显，要么就震荡。一般应该qrbound比qbound更大，之前yp设的参数会导致明显震荡。参数和效果记录在`log_parameters.odt`中
@@ -209,6 +209,21 @@
             * 现在想到的办法是让第一二个link尽量面向正前方？
         * 相机识别有几个瞬间会不准
             * 需要换大一点的`aruco`码
+
+* **0630**
+    * 改了`ws_franka`里面的`double.launch`及其相关源文件。现在机械臂上的码是99，目标码是485.
+    * 完成了`my_precise_control.py`.数据存在文件夹`0630`中.跑之前记得打开相机：
+        ```
+        (in workspace ws_franka)
+        roslaunch pylon_camera pylon_camera_node.launch 
+        roslaunch aruco_ros double.launch
+        rosrun rqt_image_view rqt_image_view 
+
+        (in frankapy)
+        bash bash_scripts/start_control_pc.sh -i localhost
+        (in environment py36)
+        python examples/my_precise_control.py
+        ```
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
