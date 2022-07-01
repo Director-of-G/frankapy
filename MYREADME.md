@@ -201,6 +201,14 @@
     * `examples`文件夹下的带有`my_yxj_test`的都是我的随意测试的代码，没什么用，不用管它们
 * **0623**
     * 在`my_gzb_adaptive_control.py`中新增了两个类：`MyConstantsSim`和`AdaptiveImageJacobianSim`。对于原来的`AdaptiveImageJacobian`，个人感觉里面不应该放各种`region control`控制器，于是新建了针对仿真中`Js`更新的`AdaptiveImageJacobianSim`.测试代码是函数`test_adaptive_region_control()`
+* **0628**
+    * 出校着手实物实验。
+    * 几乎完成不使用ANN时的`cartesian, vision and joint region`的实物实验。能跑但是有几个问题：
+        * 没法抓住。视觉空间确实能到达目标位置，但是深度全过程中几乎不变，要么碰到要么太高。
+        * Franka在路径附近本质上是没有`singularity`的。
+            * 现在想到的办法是让第一二个link尽量面向正前方？
+        * 相机识别有几个瞬间会不准
+            * 需要换大一点的`aruco`码
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
