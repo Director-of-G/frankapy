@@ -563,11 +563,15 @@ class AdaptiveRegionControllerSim(object):
             # raise ValueError('Matrix W_hat should not be empty!')
         self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
 
-        cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.3,0.7],[-0.3,0.7],[0,1]])}
+        cfg = {'n_dim': 3,
+               'n_k_per_dim': 10,
+               'sigma': 1,
+            #    'pos_restriction': np.array([[-0.35, 0.30], [0.25, 0.65], [0.40, 0.70]]),
+               'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
-        self.image_space_region = ImageSpaceRegion(b=np.array([1920,1080]))
+        self.image_space_region = ImageSpaceRegion(b=np.array([1920, 1080]))
 
         self.cartesian_space_region = CartesianSpaceRegion()
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
@@ -1190,7 +1194,7 @@ def test_vision_joint_space_region_control():
         pickle.dump(info, f)
 
 # 0623 yxj
-def test_adaptive_region_control():
+def test_adaptive_region_control(allow_update=False):
     class data_collection(object):
         def __init__(self) -> None:
             self.J = np.zeros((6, 7))
@@ -1291,7 +1295,8 @@ def test_adaptive_region_control():
         """
         if data_c.is_data_with_vision_1_ready():
             dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True)
-            controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1)
+            if allow_update:
+                controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1)
         else:
             dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=False)
         print('Js: ', controller_adaptive.Js_hat)
@@ -1522,5 +1527,5 @@ if __name__ == '__main__':
 
     # yxj 20220623
     # nh_ = rospy.init_node('joint_space_region_testbench', anonymous=True)
-    test_adaptive_region_control()
+    test_adaptive_region_control(allow_update=True)
     # plot_figures3()
