@@ -669,6 +669,7 @@ class AdaptiveRegionControllerSim(object):
             """
             for r_idx in range(self.W_hat.shape[0]):
                 self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
+            print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
             self.W_init_flag = True
         
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)

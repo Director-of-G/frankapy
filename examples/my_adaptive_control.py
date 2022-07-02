@@ -2,17 +2,37 @@
     my_adaptive_control.py, 2022-05-01
     Copyright 2022 IRM Lab. All rights reserved.
 """
-from frankapy.franka_arm import FrankaArm
+from cProfile import label
+import collections
+from turtle import position
+from matplotlib.contour import ContourLabeler
+# from frankapy.franka_arm import FrankaArm
 import rospy
-import tf
+# import tf
 
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 import math
+import time
+import pdb
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from my_utils import Quat, RadialBF
 from matplotlib import pyplot as plt
-import pdb
+from std_msgs.msg import Float64MultiArray
+from matplotlib import pyplot as plt
+import pickle
+
+from franka_example_controllers.msg import JointVelocityCommand
+from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
+from frankapy.proto import JointPositionVelocitySensorMessage, ShouldTerminateSensorMessage
+from franka_interface_msgs.msg import SensorDataGroup
+from frankapy import FrankaArm,SensorDataMessageType
+from frankapy import FrankaConstants as FC
+
+from geometry_msgs.msg import PointStamped
 
 # Definition of Constants
 class MyConstants(object):
@@ -24,31 +44,7 @@ class MyConstants(object):
     FY_HAT = 2341.164794921875
     U0 = 746.3118044533257
     V0 = 564.2590475570069
-
-class MyJacobianHandler(object):
-    """
-        @ Class: MyJacobianHandler
-        @ Function: get Jacobian of 6*1 velocity vector between different frames in /tf
-    """
-    def __init__(self) -> None:
-        self.tf_listener = tf.TransformListener()
-
-    def calcJacobian(self, from_frame=None, to_frame=None):
-        frameA = 'world' if from_frame is None else from_frame
-        frameB = 'world' if to_frame is None else to_frame
-        try:
-            (trans_AinB, rot_A2B) = self.tf_listener.lookupTransform(target_frame=frameA, source_frame=frameB, time=rospy.Time(0))
-            trans_BinA = (-trans_AinB).reshape(3, 1)
-            (px, py, pz) = np.matmul(rot_A2B, trans_BinA)
-            P_cross_mat = np.array([[0, -pz, py], \
-                                    [pz, 0, -px], \
-                                    [-py, px, 0]])
-            J_A2B = np.block([[rot_A2B, P_cross_mat], \
-                              [np.zeros((3, 3)), rot_A2B]])
-
-            return J_A2B
-        except:
-            raise NotImplementedError('Failed to get Jacobian matrix from %s to %s' % (from_frame, to_frame))
+    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.2342875493162069])
 
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
@@ -68,11 +64,11 @@ class ImageSpaceRegion(object):
         return (fv <= 0)
     def Pv(self, x):  # x => (1, 2)
         fv = self.fv(x)
-        return 0.5 * self.Kv * (1 - math.min(0, fv) ** 2)
+        return 0.5 * self.Kv * (1 - np.minimum(0, fv) ** 2)
     def kesi_x(self, x):  # x => (1, 2)
         partial_fv = 2 * (x - self.x_d) / (self.b ** 2)
         partial_fv = partial_fv.reshape(1, -1)
-        return - self.Kv * min(0, self.fv(x)) * partial_fv
+        return - self.Kv * np.minimum(0, self.fv(x)) * partial_fv
 
 class CartesianSpaceRegion(object):
     def __init__(self, r_c=None, c=None, Kc=None) -> None:
@@ -116,6 +112,9 @@ class CartesianSpaceRegion(object):
             if abs(yaw - r_c[5]) > np.pi:
                 yaw = 2 * r_c[5] - yaw
             r[3], r[5] = roll, yaw
+        else:
+            r_c = self.r_c
+            c = self.c
         fc = ((r - r_c) / c) ** 2 - 1
         return fc
 
@@ -125,9 +124,9 @@ class CartesianSpaceRegion(object):
 
     def Pc(self, r):
         fc = self.fc(r)
-        return np.sum(0.5 * self.Kc * np.max(0, fc) ** 2)
+        return np.sum(0.5 * self.Kc * np.maximum(0, fc) ** 2)
 
-    def kesi_r(self, r, with_rot=False):
+    def kesi_r(self, r, with_rot=False):  # r => (1, 3)
         if with_rot:  # deprecated
             r, r_c, c = r.reshape(6, 1), self.r_c.reshape(6, 1), self.c.reshape(6, 1)
             roll, yaw = r[3], r[5]
@@ -136,24 +135,30 @@ class CartesianSpaceRegion(object):
             if abs(yaw - r_c[5]) > np.pi:
                 yaw = 2 * r_c[5] - yaw
             r[3], r[5] = roll, yaw
+        else:
+            r_c = self.r_c
+            c = self.c
         partial_fc = 2 * (r - r_c) / (c ** 2)
         partial_fc = partial_fc.reshape(1, -1)
-        return self.Kc * np.max(0, self.fc(r)) * partial_fc
+        return (self.Kc * np.maximum(0, self.fc(r)) * partial_fc).reshape(1, -1)
 
 class CartesianQuatSpaceRegion(object):
-    def __init__(self, q_g:Quat=None, Ko=1) -> None:
-        self.q_g = q_g  # Quat
+    def __init__(self, q_g:np.ndarray=None, Ko=1) -> None:
+        self.q_g = Quat(q_g)  # Quat
         self.q_diff = Quat()  # Quat
-        self.Ko = Ko  # Quat
+        self.Ko = Ko  # float
 
-    def set_q_g(self, q_g: Quat):
-        self.q_g = q_g  # Quat
+    def set_q_g(self, q_g: np.ndarray):
+        self.q_g = Quat(q_g)  # Quat
 
     def set_Ko(self, Ko):
         self.Ko = Ko  # float
     
     def fo(self, q:Quat, return_diff=False):
-        self.q_diff = q.dq_(self.q_g)
+        q_unit = q.unit_()
+        q_g_unit = self.q_g.unit_()
+        self.q_diff = q_unit.dq_(q_g_unit).unit_()
+        # self.q_diff = q_g_unit.dq_(q_unit)
         if return_diff:
             return self.Ko * self.q_diff.logarithm_(return_norm=True) - 1, self.q_diff
         else:
@@ -166,8 +171,9 @@ class CartesianQuatSpaceRegion(object):
     def Po(self, q:Quat):
         fo = self.fo(q)
 
-        return 0.5 * (max(0, fo)) ** 2
+        return 0.5 * (np.maximum(0, fo)) ** 2
 
+    # deprecated
     def get_Jrot(self, q:Quat):
         r_o = q.angle_axis_()
         norm_r_o = np.linalg.norm(r_o, ord=2)
@@ -177,22 +183,35 @@ class CartesianQuatSpaceRegion(object):
                        [[r_o[1]*r_o[0], -r_o[1]*r_o[0]], [r_o[1]**2, r_o[2]**2 + r_o[0]**2], [r_o[1]*r_o[2], -r_o[1]*r_o[2]]], \
                        [[r_o[2]*r_o[0], -r_o[2]*r_o[0]], [r_o[2]*r_o[1], -r_o[2]*r_o[1]], [r_o[2]**2, r_o[0]**2 + r_o[1]**2]]]
         J_rot_matBC = np.dot(np.array(J_rot_matBC), np.array([math.acos(norm_r_o/2)/(2*norm_r_o**2), math.sin(norm_r_o/2)/(norm_r_o**3)]))
+        pass
 
-
-    def kesi_rq(self, q:Quat):
+    def kesi_rq(self, q:np.ndarray):  # q => (4,)
+        q, q_g = Quat(q).unit_(), self.q_g.unit_()
+        q_o, q_g_inv = q.quat, q_g.inverse_().quat
         fo, q_diff = self.fo(q, return_diff=True)
-        q_o, q_g = q.quat, self.q_g.quat
-        partial_v_q = np.array([q_g[0] + q_o[0] * np.sum(q_g[1, 2, 3]/q_o[1, 2, 3]), \
-                                -q_g[1] + q_o[1] * np.sum(q_g[[0, 2, 3]]/q_o[[0, 2, 3]]), \
-                                -q_g[2] + q_o[2] * np.sum(q_g[[0, 1, 3]]/q_o[[0, 1, 3]]), \
-                                -q_g[3] + q_o[3] * np.sum(q_g[[0, 1, 2]]/q_o[[0, 1, 2]])])
-        u = q_diff[1:]
+        q_sign = np.array([-1, 1, 1])
+        partial_v_q = np.array([q_g_inv[0] + q_o[0] * np.sum(q_g_inv[[1, 2, 3]]/q_o[[1, 2, 3]]), \
+                                -q_g_inv[1] + q_o[1] * np.sum(q_g_inv[[0, 2, 3]]/q_o[[0, 2, 3]]*q_sign), \
+                                -q_g_inv[2] + q_o[2] * np.sum(q_g_inv[[0, 1, 3]]/q_o[[0, 1, 3]]*q_sign), \
+                                -q_g_inv[3] + q_o[3] * np.sum(q_g_inv[[0, 1, 2]]/q_o[[0, 1, 2]]*q_sign)])  # (4,)
+        u = q_diff.u_()
         norm_u = np.linalg.norm(u, ord=2)
 
-        partial_P_q = (-(self.Ko / norm_u) * max(0, fo) * partial_v_q * (norm_u > 0)).reshape(1, -1)
+        partial_P_q = (-(self.Ko / norm_u) * np.maximum(0, fo) * partial_v_q * (norm_u > 0)).reshape(1, 4)
+        J_rot = q.jacobian_rel2_axis_angle_()  # (4, 3)
 
-        return (-(self.Ko / norm_u) * max(0, fo) * partial_v_q * (norm_u > 0)).reshape(1, -1)
+        return (partial_P_q @ J_rot).reshape(1, -1)
 
+    def kesi_rq_omega(self, q:np.ndarray):
+        q, q_g = Quat(q).unit_(), self.q_g.unit_()
+        q_diff = q.dq_(q_g)
+
+        axis, theta = q_diff.axis_angle_(split=True)
+        axis_normalized = axis / np.linalg.norm(axis, ord=2)
+        if theta > math.pi:
+            theta = - (2 * math.pi - theta)
+        return theta * axis_normalized.reshape(1, 3)
+        
 class JointSpaceRegion(object):
     def __init__(self) -> None:
         self.single_kq = np.zeros((1, 0))
@@ -250,7 +269,7 @@ class JointSpaceRegion(object):
         fq_multi = fq_multi * self.multi_inout  # (1, n_multi)
         fqr_multi = fqr_multi * self.multi_inout  # (1, n_multi)
 
-        print(fq_single, fqr_single, fq_multi, fqr_multi)
+        # print(fq_single, fqr_single, fq_multi, fqr_multi)
 
         return fq_single.reshape(1, n_single), fqr_single.reshape(1, n_single), \
                 fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
@@ -294,13 +313,13 @@ class JointSpaceRegion(object):
 
         return kesi_q.reshape(1, -1)
 
-
-class AdaptiveImageJacobian(object):
+class KnownImageJacobian(object):
     """
         @ Class: AdaptiveImageJacobian
         @ Function: adaptive update the image jacobian
     """
-    def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    # def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
         # n_k_per_dim => the number of rbfs in each dimension
         if fa is None:
             raise ValueError('FrankaArm handle is not provided!')
@@ -322,44 +341,49 @@ class AdaptiveImageJacobian(object):
             self.Js_hat = Js
         else:  # control with precise Js
             if x is None:
-                raise ValueError('Target point x on the image plane should not be empty!')
+                # raise ValueError('Target point x on the image plane should not be empty!')
+                x = np.array([1440/2,1080/2])
             fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT
             u0, v0 = MyConstants.U0, MyConstants.V0
             u, v = x[0] - u0, x[1] - v0
             z = 1
-            J_cam2img = np.array([[fx/z, 0, -u/z, -u*v/fx, (fx+u**2)/fx, -v], \
-                                  [0, fy/z, -v/z, -(fy+v**2)/fy, u*v/fy, u]])
-            J_base2cam = MyJacobianHandler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
+            J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
+                                  [0, fy/z, -v/z, 0, 0, 0]])
+            R_c2b = np.array([[-1, 0,  0],
+            [0, 1, 0],
+            [0, 0, -1]])            
             
-            rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
-            (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked
-            J_baserpy2w = np.block([[np.eye(3), np.zeros((3, 3))], \
-                                    [np.zeros((3, 3)), np.array([[1, 0, math.sin(p)], \
-                                                                 [0, math.cos(r), -math.cos(p) * math.sin(r)], \
-                                                                 [0, math.sin(r), math.cos(p) * math.cos(r)]])]])
-            self.Js_hat = J_cam2img @ J_base2cam  # Js_hat = J_base2img
+            self.Js_hat = J_cam2img @ np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])  # Js_hat = J_base2img
 
-        if L is not None:
-            if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
-                raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
-            self.L = L
-        else:
-            raise ValueError('Matrix L should not be empty!')
+        # now we do not update Js!! yxj 0630
+        # if L is not None:
+        #     if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
+        #         raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
+        #     self.L = L
+        # else:
+        #     raise ValueError('Matrix L should not be empty!')
 
-        if W_hat is not None:
-            if W_hat.shape != (2 * self.m, self.n_k):  # (12, 1000)
-                raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
-            self.W_hat = W_hat
-        else:
-            raise ValueError('Matrix W_hat should not be empty!')
-
-        self.theta = RadialBF()
+        # if W_hat is not None:
+        #     if W_hat.shape != (2 * self.m, self.n_k):  # (12, 1000)
+        #         raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
+        #     self.W_hat = W_hat
+        # else:
+        #     raise ValueError('Matrix W_hat should not be empty!')
+        cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.1,0.9],[-0.5,0.5],[0,1]])}
+        self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
-        self.image_space_region = ImageSpaceRegion()
+        self.image_space_region = ImageSpaceRegion(b=np.array([1440/2,1080/2]))
         self.cartesian_space_region = CartesianSpaceRegion()
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         self.joint_space_region = JointSpaceRegion()
+
+        self.cartesian_space_region.set_r_c(MyConstants.CARTESIAN_CENTER)
+        self.cartesian_space_region.set_c(np.array([0.02, 0.02, 0.02]).reshape(1, 3))
+        self.cartesian_space_region.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
+
+        self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
+        self.cartesian_quat_space_region.set_Ko(15)
 
     def kesi_x(self, x):
         return self.image_space_region.kesi_x(x.reshape(1, -1))
@@ -379,53 +403,27 @@ class AdaptiveImageJacobian(object):
     def get_Js_hat(self):
         return self.Js_hat
 
-    def update(self):
-        r = self.fa.get_pose()  # get r: including translation and rotation matrix
-        q = self.fa.get_joints()  # get q: joint angles
+    def get_u(self,J,d,r_t,r_o,q,x):
+        J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
-        # split Cartesian translation and quaternion
-        r_tran = r.translation
-        r_quat = r.quaternion  # w, x, y, z
+        kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
 
-        theta = self.get_theta(r_tran)  # get the neuron values theta(r) (1000*1)
-        J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
-        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
-        J_rot = Quat(r_quat).jacobian_rel2_axis_angle_()  # get the jacobian (partial p / partial r_o^T) (4, 3)
-        
-        kesi_x = self.kesi_x().reshape(-1, 1)  # (2, 1)
-        kesi_rt = self.kesi_r().reshape(-1, 1)  # (3, 1)
-        kesi_rq = self.kesi_rq() @ J_rot  # (1, 4) @ (4, 3) = (1, 3)
-        kesi_r = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
-        kesi_q = self.kesi_q().reshape(-1, 1)  # (7, 1)
+        kesi_r = self.kesi_r(r_t.reshape(1, 3))  # (1, 3)
+        if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
+            kesi_rq = np.zeros((1, 3))
+        else:
+            kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
+        kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
+        self.kesi_rall = kesi_rall
 
-        kesi_x_pie = np.c_[kesi_x[0] * np.eye(6), kesi_x[1] * np.eye(6)]  # (6, 12)
+        kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
 
-        dW_hat = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T  # (1000, 6)
-        dW_hat = dW_hat @ kesi_x_pie  # (1000, 12)
+        u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
+        return u
 
-        self.W_hat = self.W_hat + dW_hat.T
-
-        # update J_s
-        temp_Js_hat = self.W_hat @ theta  # (12, 1)
-        self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
-
-        # deprecated
-        '''
-        dW_hat1_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T * kesi_x[0]
-        dW_hat2_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T * kesi_x[1]
-
-        dW_hat1, dW_hat2 = dW_hat1_T.T, dW_hat2_T.T  # (6, n_k), (6, n_k)
-        dW_hat = np.concatenate((dW_hat1, dW_hat2), axis=0)  # (12, n_k)
-        self.W_hat = self.W_hat + dW_hat  # (12, n_k)
-
-        Js_hat1 = self.W_hat[:6, :] @ theta  # (6, 1)
-        Js_hat2 = self.W_hat[6:, :] @ theta  # (6, 1)
-        Js_hat = np.concatenate((Js_hat1.reshape(1, -1), Js_hat2.reshape(1, -1)), axis=0)  # (2, 6)
-        self.Js_hat = Js_hat
-        '''
 
 class JointOutputRegionControl(object):
-    def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
+    def __init__(self, sim_or_real='sim', fa=None) -> None:
         self.joint_space_region = JointSpaceRegion()
         self.sim_or_real = sim_or_real
         if sim_or_real == 'real':
@@ -438,49 +436,468 @@ class JointOutputRegionControl(object):
         self.init_joint_region()
 
     def init_joint_region(self):
-        # self.joint_space_region.add_region_multi(qc=np.array([0.7710433735413842, -0.30046383584419534, 0.581439764761865, -2.215658436023894, 0.4053359101811589, 2.7886962782933757, 0.4995608692842497]), \
-        #                                          qbound=0.12, qrbound=0.10, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=10, kr=0.1, \
-        #                                          inner=False, scale=np.ones((7, 1)))
-
-        # self.joint_space_region.add_region_multi(qc=np.array([0.35612043, -0.42095495, 0.31884579, -2.16397413, 0.36776436,2.10526431, 0.45843472]), \
-        #                                          qbound=0.08, qrbound=0.10, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=100000, kr=1000, \
-        #                                          inner=True, scale=np.ones((7, 1)))
-
-        self.joint_space_region.add_region_multi(qc=np.array([1.1276347655767918, -1.0981265049638491, 2.0099641655538036, -2.1242269583241704, 2.3038052212417757, 2.816829597776607, 2.4020218102461683]), \
+        self.joint_space_region.add_region_multi(qc=np.array([1.19876445, 0.16743403, 0.46827566, -2.40414747, 0.47512512, 3.3847505, 0.42326836]), \
                                                  qbound=0.12, qrbound=0.10, \
                                                  mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-                                                 kq=10, kr=0.1, \
+                                                 kq=1, kr=0.01, \
                                                  inner=False, scale=np.ones((7, 1)))
-
-        # self.joint_space_region.add_region_multi(qc=np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]), \
-        #                                          qbound=0.50, qrbound=0.45, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=10000000, kr=100000, \
-        #                                          inner=True, scale=np.ones((7, 1)))
-
+        self.singularity_joint = np.array([1.19582476e+00, -1.79016522e-03, 3.56311106e-01, -2.51608346e+00, 4.75119009e-01, 3.31746127e+00, 5.93365287e-01])
+        self.joint_space_region.add_region_multi(qc=self.singularity_joint, \
+                                                 qbound=0.50, qrbound=0.45, \
+                                                 mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
+                                                 kq=1000000, kr=10000, \
+                                                 inner=True, scale=np.ones((7, 1)))# this is joint sigularity position: inner = True
     def calc_manipubility(self, J_b):
         det = np.linalg.det(J_b @ J_b.T)
         return math.sqrt(np.abs(det))
 
-    def get_dq_d_(self, q:np.ndarray, d:np.ndarray=np.zeros((7, 1)), J_sim:np.ndarray=None):
+    def get_dq_d_(self, q:np.ndarray, d:np.ndarray=np.zeros((7, 1)), J_sim:np.ndarray=None, time_start_this_loop=None):
         q, d = q.reshape(7,), d.reshape(7, 1)
         if self.sim_or_real == 'real':
-            J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
+            J = self.fa.get_jacobian(q) # get the analytic jacobian (6*7)
+            # print(J) 
         elif self.sim_or_real == 'sim':
             J = J_sim
+        # print('time consumption2: ', time.time() - time_start_this_loop)
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        # print('time consumption3: ', time.time() - time_start_this_loop)
         N = np.eye(7) - J_pinv @ J  # get the zero space matrix (7*7)
-        kesi_q = self.joint_space_region.kesi_q(q).reshape(7, 1) / 10
+        kesi_q = self.joint_space_region.kesi_q(q).reshape(7, 1)
 
         dq_d = - J_pinv @ (J @ kesi_q) + N @ np.linalg.inv(self.cd) @ d  # (7, 1)
         # dq_d = - kesi_q
 
         return dq_d, kesi_q
 
+class AdaptiveRegionControllerSim(object):
+    """
+        @ Class: AdaptiveRegionControllerSim
+        @ Function: copied and modified from AdaptiveImageJacobian, region controller with adaptive or precise Js
+    """
+    # def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+        # n_k_per_dim => the number of rbfs in each dimension
+
+        if fa is None:
+            # raise ValueError('FrankaArm handle is not provided!')
+            print('-------simulation-------')
+            self.fa = None
+        else:
+            self.fa = fa
+
+        # dimensions declaration
+        self.m = 6  # the dimension of Cartesian space configuration r
+        self.n_k = n_k_per_dim ** 3  # the dimension of rbf function θ(r)
+        # Js has three variables (x, y, z), 
+        # and (θi, θj, θk) do not actually affect Js, 
+        # when r is represented as body twist
+
+        # Js here transforms Cartesian space BODY TWIST (v_b, w_b): 6 * 1 
+        # to image space velocity (du, dv): 2 * 1
+        # Js is 2 * 6, while Js[:,3:] = [0] because w_b do not actually affect (du, dv)
+        if Js is not None:
+            if Js.shape != (2, 6):
+                raise ValueError('Dimension of Js should be (2, 6), not ' + str(Js.shape) + '!')
+            self.Js_hat = Js
+        else:  # control with precise Js
+            if x is None:
+                # raise ValueError('Target point x on the image plane should not be empty!')
+                x = np.array([1440/2,1080/2])
+            fx, fy = MyConstants.FX_HAT + 200, MyConstants.FY_HAT - 200
+            u0, v0 = MyConstants.U0 - 50, MyConstants.V0 + 50
+            u, v = x[0] - u0, x[1] - v0
+            z = 1
+            """
+                This Js seems wrong
+            """
+            # J_cam2img = np.array([[fx/z, 0,    -u/z, -u*v/fx,      (fx+u**2)/fx, -v], \
+            #                       [0,    fy/z, -v/z, -(fy+v**2)/fy, u*v/fy,       u]])
+            """
+                This Js seems right
+            """
+            J_cam2img = np.array([[fx/z, 0,    -u/z, 0, 0, 0], \
+                                  [0,    fy/z, -v/z, 0, 0, 0]])
+
+            # my_jacobian_handler = ()
+            # J_base2cam = my_jacobian_handler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
+            # print(J_base2cam)
+
+            R_c2b = np.array([[-0.99851048, -0.0126514,   0.05307315],
+                [-0.01185424,  0.99981255,  0.01530807],
+                [-0.05325687,  0.01465613, -0.99847329]])
+            J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
+            # print('J_base2cam',J_base2cam)
+            
+            # rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
+            # (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked
+            # J_baserpy2w = np.block([[np.eye(3), np.zeros((3, 3))], \
+            #                         [np.zeros((3, 3)), np.array([[1, 0, math.sin(p)], \
+            #                                                      [0, math.cos(r), -math.cos(p) * math.sin(r)], \
+            #                                                      [0, math.sin(r), math.cos(p) * math.cos(r)]])]])
+            self.Js_hat = J_cam2img @ J_base2cam  # Js_hat = J_base2img
+
+        if L is not None:
+            if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
+                raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
+            self.L = L
+        else:
+            self.L = np.eye(1000) * 5000
+            # raise ValueError('Matrix L should not be empty!')
+
+        if W_hat is not None:
+            if W_hat.shape != (2 * self.m, self.n_k):  # (12, 1000)
+                raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
+            self.W_hat = W_hat
+        else:
+            self.W_hat = np.zeros((2*6,1000)) # initial all w are zeros
+            # raise ValueError('Matrix W_hat should not be empty!')
+        self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
+
+        cfg = {'n_dim': 3,
+               'n_k_per_dim': 10,
+               'sigma': 1,
+            #    'pos_restriction': np.array([[-0.35, 0.30], [0.25, 0.65], [0.40, 0.70]]),
+               'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
+        self.theta = RadialBF(cfg=cfg)
+        self.theta.init_rbf_()
+
+        self.image_space_region = ImageSpaceRegion(b=np.array([1440/2, 1080/2]))
+
+        self.cartesian_space_region = CartesianSpaceRegion()
+        self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
+        self.cartesian_space_region.set_r_c(MyConstants.CARTESIAN_CENTER)  # set by jyp | grasping pose above the second object with marker
+        self.cartesian_space_region.set_c(np.array([0.02, 0.02, 0.02]).reshape(1, 3))
+        self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
+
+        # self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # set by yxj | grasping pose on the right
+        self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
+        self.cartesian_quat_space_region.set_Ko(60)
+
+
+        self.joint_space_region = JointSpaceRegion()
+        # self.joint_space_region.add_region_multi(qc=np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]), \
+        #                                             qbound=0.50, qrbound=0.45, \
+        #                                             mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
+        #                                             kq=1000000, kr=10000, \
+        #                                             inner=True, scale=np.ones((7, 1)))
+
+    def kesi_x(self, x):
+        return self.image_space_region.kesi_x(x.reshape(1, -1))
+
+    def kesi_r(self, r):
+        return self.cartesian_space_region.kesi_r(r.reshape(1, -1))
+
+    def kesi_rq(self, rq):
+        return self.cartesian_quat_space_region.kesi_rq_omega(rq.reshape(-1,)) / 2
+
+    def kesi_q(self, q):
+        return self.joint_space_region.kesi_q(q.reshape(1, 7))
+
+    def get_theta(self, r):
+        return self.theta.get_rbf_(r)
+
+    def get_Js_hat(self):
+        return self.Js_hat
+
+    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False):
+        J_pinv = J.T @ np.linalg.pinv(J @ J.T)
+
+        kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
+
+        kesi_r = self.kesi_r(r_t.reshape(1, 3))  # (1, 3)
+        if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
+            kesi_rq = np.zeros((1, 3))
+        else:
+            kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
+        kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
+        self.kesi_rall = kesi_rall
+
+        kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
+
+        if with_vision:
+            u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
+            # Js_hat_pinv = self.Js_hat.T @ np.linalg.inv(self.Js_hat @ self.Js_hat.T)  # try pseudo inverse of Js
+            # u = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
+        else:
+            u = - J_pinv @ (kesi_rall + J @ kesi_q)
+
+        # print('kesi_x', kesi_x)
+        # print('kesi_rall', kesi_rall)
+        # print('u_image_part', (- J_pinv @ (self.Js_hat.T @ kesi_x)).reshape(-1,))
+        # print('u_cartesian_part', (- J_pinv @ kesi_rall).reshape(-1,))
+        # print('u_joint_part', (- J_pinv @ (J_pinv.T @ kesi_q)).reshape(-1,))
+        return u
+
+    def update(self, J=None, r_t=None, r_o=None, q=None, x=None): # used when adaptive, if u are precise, don't use it
+        if self.fa is not None:
+            r = self.fa.get_pose()  # get r: including translation and rotation matrix
+            q = self.fa.get_joints()  # get q: joint angles
+            # split Cartesian translation and quaternion
+            r_tran = r.translation
+            r_quat = r.quaternion  # w, x, y, z
+            # get the analytic jacobian (6*7)
+            J = self.fa.get_jacobian(q)
+        else:
+            r_tran = r_t
+            r_quat = r_o
+            # J, q and x are passed through parameters
+
+        theta = self.get_theta(r_tran).reshape(-1, 1)  # get the neuron values theta(r) (1000*1)
+        if not self.W_init_flag:
+            """
+                Initial Method #1
+            """
+            # self.W_hat[:, 0] = self.Js_hat.reshape(-1,) / theta[0]
+            """
+                Initial Method #2
+            """
+            # self.W_hat = np.random.rand(12, 1000)
+            """
+                Initial Method #3
+            """
+            for r_idx in range(self.W_hat.shape[0]):
+                self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
+            print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
+            self.W_init_flag = True
+        
+        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
+        
+        kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
+        kesi_rt = self.kesi_r(r_tran).reshape(-1, 1)  # (3, 1)
+        kesi_rq = self.kesi_rq(r_quat)  # (1, 4) @ (4, 3) = (1, 3)
+        kesi_rall = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
+        kesi_q = self.kesi_q(q).reshape(-1, 1)  # (7, 1)
+
+        kesi_x_prime = np.c_[kesi_x[0] * np.eye(6), kesi_x[1] * np.eye(6)]  # (6, 12)
+
+        dW_hat = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T  # (1000, 6)
+        dW_hat = dW_hat @ kesi_x_prime  # (1000, 12)
+
+        self.W_hat = self.W_hat + dW_hat.T
+
+        # update J_s
+        temp_Js_hat = self.W_hat @ theta  # (12, 1)
+        # np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T
+        self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
+        print((self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T)
+
+# 0702 yxj
+def test_adaptive_region_control(fa, allow_update=False):
+    class vision_collection(object):
+        def __init__(self) -> None:
+            self.vision_1_ready = False
+            self.vision_2_ready = False
+            self.x1 = np.array([-1000,-1000])
+            self.x2 = np.zeros((2,))
+
+        def vision_1_callback(self, msg):
+            self.x1 = np.array([msg.point.x,msg.point.y])
+            if not self.vision_1_ready:
+                self.vision_1_ready = True
+
+        def vision_2_callback(self, msg):
+            self.x2 = np.array([msg.point.x,msg.point.y])
+            if not self.vision_2_ready:
+                self.vision_2_ready = True
+
+        def is_data_without_vision_1_ready(self):
+            return self.vision_2_ready
+
+        def is_data_with_vision_1_ready(self):
+            return self.vision_1_ready & self.vision_2_ready
+
+    desired_position_bias = np.array([-200, -100])
+    data_c = vision_collection()
+    controller_adaptive = AdaptiveRegionControllerSim(fa)
+    
+    pre_traj = "./data/0702/my_adaptive_control/allow_false/"
+
+    # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
+    sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
+    sub_vision_2_ = rospy.Subscriber('/aruco_simple/pixel2', PointStamped, data_c.vision_2_callback, queue_size=1)
+    pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+    rate_ = rospy.Rate(100)
+
+    print("wait for the object to be grasped! ")
+    # init control scheme
+    while 1:
+        if data_c.is_data_without_vision_1_ready():
+            target = data_c.x2
+            target[0] = target[0]+desired_position_bias[0]
+            target[1] = target[1]+desired_position_bias[1]
+            controller_adaptive.image_space_region.set_x_d(target)
+            controller_adaptive.image_space_region.set_Kv(0.2)
+            print('vision region is set!')
+            print(data_c.x2)
+            print(target)
+            break
+
+
+    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
+    q_and_manipubility_list = np.zeros((0, 8))
+    f_quat_list,p_quat_list,quat_list,kesi_rall_list,position_list = [],[],[],[],[]
+
+    max_execution_time = 20.0
+
+    home_joints = fa.get_joints()
+    fa.dynamic_joint_velocity(joints=home_joints,
+                                joints_vel=np.zeros((7,)),
+                                duration=max_execution_time,
+                                buffer_time=10,
+                                block=False)
+    i=0
+
+    time_start = rospy.Time.now().to_time()
+    
+    # update control scheme
+    while not rospy.is_shutdown():
+        q_and_m = np.zeros((1, 8))
+        q_and_m[0, :7] = fa.get_joints()
+        J = fa.get_jacobian(q_and_m[0, :7])
+        det = np.linalg.det(J @ J.T)
+        q_and_m[0, 7] = math.sqrt(np.abs(det))
+        pose = fa.get_pose()
+
+        q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
+
+        d = np.array([[0],[0],[0],[0],[0],[0]])
+
+        """
+            unless the marker attached to gripper is seen
+            donnot update Js and exclude it from calculating dq_d_
+        """
+        if data_c.is_data_with_vision_1_ready():
+            dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=True)
+            if allow_update:
+                controller_adaptive.update(J, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1)
+        else:
+            dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=False)
+        print('Js: ', controller_adaptive.Js_hat)
+        
+        time_now = rospy.Time.now().to_time() - time_start
+        traj_gen_proto_msg = JointPositionVelocitySensorMessage(
+            id=i, timestamp=time_now, 
+            seg_run_time=max_execution_time,
+            joints=home_joints,
+            joint_vels=dq_d_.reshape(7,).tolist()
+        )
+        ros_msg = make_sensor_group_msg(
+            trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+                traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION_VELOCITY)
+        )
+        i += 1
+        rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+        pub.publish(ros_msg)
+
+        # logging
+        time_list.append(time.time()-time_start)
+        pixel_1_list.append(data_c.x1)
+        pixel_2_list.append(data_c.x2)
+        f_list.append(controller_adaptive.image_space_region.fv(data_c.x1))
+        p_list.append(controller_adaptive.image_space_region.Pv(data_c.x1))
+        kesi_x_list.append(controller_adaptive.image_space_region.kesi_x(data_c.x1).reshape((-1,)))
+
+        f_quat_list.append(controller_adaptive.cartesian_quat_space_region.fo(Quat(pose.quaternion)))
+        p_quat_list.append(controller_adaptive.cartesian_quat_space_region.Po(Quat(pose.quaternion)))
+        quat_list.append(pose.quaternion.tolist())
+        kesi_rall_list.append(controller_adaptive.kesi_rall)
+        position_list.append(pose.translation)
+
+        if time.time() - time_start >= max_execution_time:
+            # terminate dynamic joint velocity control
+            term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - time_start, should_terminate=True)
+            ros_msg = make_sensor_group_msg(
+            termination_handler_sensor_msg=sensor_proto2ros_msg(
+                term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
+            )
+            pub.publish(ros_msg)
+            break
+            # print(kesi_r)
+            # print(kesi_rq)
+        
+        rate_.sleep()
+
+    
+    # vision part
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(time_list, f_list, color='b',label = 'f')
+    plt.plot(time_list, p_list, color='r',label = 'P')
+    plt.title('f and P for vision region')
+    plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(time_list,kesi_x_list,label = 'kesi')
+    plt.title('kesi_x')
+    plt.savefig(pre_traj+'f_P_kesi_x.jpg')
+
+    plt.figure()
+    plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
+    plt.plot(time_list, pixel_2_list,color='r',label = 'desired position')
+    plt.legend()
+    plt.title('vision position vs time')
+    plt.savefig(pre_traj+'vision_position.jpg')
+
+    plt.figure()
+    plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b',label = 'vision trajectory')
+    plt.scatter(target[0], target[1],color='r',label = 'desired position')
+    plt.xlim([0,1440])
+    plt.ylim([0,1080])
+    plt.legend()
+    plt.title('vision trajectory')
+    plt.savefig(pre_traj+'vision_trajectory.jpg')
+
+    # cartesian part
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(time_list, f_quat_list, color='b',label = 'f_quat')
+    plt.plot(time_list, p_quat_list, color='r',label = 'p_quat')
+    plt.title('f and p for quaternion')
+    plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(time_list, quat_list)
+    plt.title('quaternion vs time')
+    plt.savefig(pre_traj+'cartesian_quat.jpg')
+
+    plt.figure()
+    ax1 = plt.axes(projection='3d')
+    position_array  = np.array(position_list)
+    ax1.plot3D(position_array[:,0],position_array[:,1],position_array[:,2],label='traj')
+    ax1.scatter(position_array[0,0],position_array[0,1],position_array[0,2],c='r',label='initial')
+    ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
+    ax1.scatter(MyConstants.CARTESIAN_CENTER[0],MyConstants.CARTESIAN_CENTER[1],MyConstants.CARTESIAN_CENTER[2],c='g',label='goal region center')
+    ax1.legend()
+    ax1.set_xlabel('x/m')
+    ax1.set_ylabel('y/m')
+    ax1.set_zlabel('z/m')
+    plt.title('executed trajectory 3D')
+    plt.savefig(pre_traj+'cartesian_3d.jpg')
+
+    plt.figure()
+    plt.plot(time_list,np.reshape(kesi_rall_list,(np.shape(time_list)[0],-1)),label = 'kesi')
+    plt.legend()
+    plt.title('kesi for 6 dimensions')
+    plt.savefig(pre_traj+'cartesian_kesi.jpg')
+
+    plt.show()
+    info = {'f_list': f_list, \
+            'p_list': p_list, \
+            'kesi_x_list': kesi_x_list, \
+            'pixel_1_list': pixel_1_list, \
+            'pixel_2_list': pixel_2_list, \
+            'time_list': time_list, \
+            'q_and_manipubility_list':q_and_manipubility_list,\
+            'quat_list': quat_list,\
+            'f_quat_list':f_quat_list,\
+            'p_quat_list':p_quat_list,\
+            'kesi_rall_list':kesi_rall_list,\
+            'position_list':position_list}
+    with open(pre_traj + 'data.pkl', 'wb') as f:
+        pickle.dump(info, f)
+
 
 if __name__ == '__main__':
-    pass
+    fa = FrankaArm()
+    # test_joint_space_region_control(fa=fa)
+    test_adaptive_region_control(fa=fa)
+    # plot_figures()
+    

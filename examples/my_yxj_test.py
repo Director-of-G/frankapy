@@ -1,22 +1,24 @@
-from cv2 import randn
-from franka_example_controllers.msg import JointVelocityCommand
-from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
-from frankapy.proto import JointPositionVelocitySensorMessage, ShouldTerminateSensorMessage
-from franka_interface_msgs.msg import SensorDataGroup
-from frankapy import FrankaArm,SensorDataMessageType
-from frankapy import FrankaConstants as FC
+# from cv2 import randn
+# from franka_example_controllers.msg import JointVelocityCommand
+# from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
+# from frankapy.proto import JointPositionVelocitySensorMessage, ShouldTerminateSensorMessage
+# from franka_interface_msgs.msg import SensorDataGroup
+# from frankapy import FrankaArm,SensorDataMessageType
+# from frankapy import FrankaConstants as FC
 
-import numpy as np
-import math
+# import numpy as np
+# import math
 
-fa = FrankaArm()
+from pyquaternion import Quaternion
+
+# fa = FrankaArm()
 # pose = fa.get_pose()
 # print(pose)
 # print(pose.position)
 # print(pose.rotation)
 # print(pose.quaternion)
-log_m = []
-log_j = []
+# log_m = []
+# log_j = []
 
 # for i in range(10000):
 #     joint = np.array([0.897782, 0.20624612, 0.53392278, -2.34249171, -0.20088835, 3.2333697, 0.97114771])+0.1*np.random.rand(7)
@@ -29,6 +31,10 @@ log_j = []
 # print(log_m[np.argmin(log_m)])
 # print(log_j[np.argmin(log_m)])
 
-# print(fa.get_pose().trans)
-for item in dir(fa.get_pose()):  #top_k_metergroup是某类的一个实例化对象
-    print(item)
+# for item in dir(fa.get_pose()):  #top_k_metergroup是某类的一个实例化对象
+#     print(item)
+
+q = Quaternion(0.026593157042844106,-0.006128866589368008,0.9995994598686369,0.00749405251881394)
+print(q.rotation_matrix)
+# 相机标定信息在/home/roboticslab/.ros/easy_handeye/中
+

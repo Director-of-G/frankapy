@@ -46,31 +46,6 @@ class MyConstants(object):
     V0 = 564.2590475570069
     CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.1342875493162069])
 
-class MyJacobianHandler(object):
-    """
-        @ Class: MyJacobianHandler
-        @ Function: get Jacobian of 6*1 velocity vector between different frames in /tf
-    """
-    def __init__(self) -> None:
-        self.tf_listener = tf.TransformListener()
-
-    def calcJacobian(self, from_frame=None, to_frame=None):
-        frameA = 'world' if from_frame is None else from_frame
-        frameB = 'world' if to_frame is None else to_frame
-        try:
-            (trans_AinB, rot_A2B) = self.tf_listener.lookupTransform(target_frame=frameA, source_frame=frameB, time=rospy.Time(0))
-            trans_BinA = (-trans_AinB).reshape(3, 1)
-            (px, py, pz) = np.matmul(rot_A2B, trans_BinA)
-            P_cross_mat = np.array([[0, -pz, py], \
-                                    [pz, 0, -px], \
-                                    [-py, px, 0]])
-            J_A2B = np.block([[rot_A2B, P_cross_mat], \
-                              [np.zeros((3, 3)), rot_A2B]])
-
-            return J_A2B
-        except:
-            raise NotImplementedError('Failed to get Jacobian matrix from %s to %s' % (from_frame, to_frame))
-
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
         self.x_d = x_d  # (1, 2)
@@ -237,7 +212,6 @@ class CartesianQuatSpaceRegion(object):
             theta = - (2 * math.pi - theta)
         return theta * axis_normalized.reshape(1, 3)
         
-
 class JointSpaceRegion(object):
     def __init__(self) -> None:
         self.single_kq = np.zeros((1, 0))
@@ -339,7 +313,6 @@ class JointSpaceRegion(object):
 
         return kesi_q.reshape(1, -1)
 
-
 class KnownImageJacobian(object):
     """
         @ Class: AdaptiveImageJacobian
@@ -374,9 +347,8 @@ class KnownImageJacobian(object):
             u0, v0 = MyConstants.U0, MyConstants.V0
             u, v = x[0] - u0, x[1] - v0
             z = 1
-            J_cam2img = np.array([[fx/z, 0, -u/z, -u*v/fx, (fx+u**2)/fx, -v], \
-                                  [0, fy/z, -v/z, -(fy+v**2)/fy, u*v/fy, u]])
-            # J_base2cam = MyJacobianHandler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
+            J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
+                                  [0, fy/z, -v/z, 0, 0, 0]])
             R_c2b = np.array([[-1, 0,  0],
             [0, 1, 0],
             [0, 0, -1]])            
@@ -464,18 +436,6 @@ class JointOutputRegionControl(object):
         self.init_joint_region()
 
     def init_joint_region(self):
-        # self.joint_space_region.add_region_multi(qc=np.array([0.7710433735413842, -0.30046383584419534, 0.581439764761865, -2.215658436023894, 0.4053359101811589, 2.7886962782933757, 0.4995608692842497]), \
-        #                                          qbound=0.12, qrbound=0.10, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=10, kr=0.1, \
-        #                                          inner=False, scale=np.ones((7, 1)))
-
-        # self.joint_space_region.add_region_multi(qc=np.array([0.35612043, -0.42095495, 0.31884579, -2.16397413, 0.36776436,2.10526431, 0.45843472]), \
-        #                                          qbound=0.08, qrbound=0.10, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=100000, kr=1000, \
-        #                                          inner=True, scale=np.ones((7, 1)))
-
         self.joint_space_region.add_region_multi(qc=np.array([1.19876445, 0.16743403, 0.46827566, -2.40414747, 0.47512512, 3.3847505, 0.42326836]), \
                                                  qbound=0.12, qrbound=0.10, \
                                                  mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
@@ -553,8 +513,6 @@ def test_precise_region_control(fa):
             target[0] = target[0]-200
             target[1] = target[1]-100
             controller_adaptive.image_space_region.set_x_d(target)
-            # print("1111",controller_adaptive.image_space_region.x_d)
-            # controller_adaptive.image_space_region.set_b(50)
             controller_adaptive.image_space_region.set_Kv(0.2)
             print('vision region is set!')
             print(data_c.x2)
@@ -659,6 +617,8 @@ def test_precise_region_control(fa):
     plt.figure()
     plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b',label = 'vision trajectory')
     plt.scatter(target[0], target[1],color='r',label = 'desired position')
+    plt.xlim([0,1440])
+    plt.ylim([0,1080])
     plt.legend()
     plt.title('vision trajectory')
     plt.savefig(pre_traj+'vision_trajectory.jpg')
