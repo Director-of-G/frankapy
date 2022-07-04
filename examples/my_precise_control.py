@@ -525,7 +525,7 @@ def test_precise_region_control(fa):
     q_and_manipubility_list = np.zeros((0, 8))
     f_quat_list,p_quat_list,quat_list,kesi_rall_list,position_list = [],[],[],[],[]
 
-    max_execution_time = 20.0
+    max_execution_time = 25
 
     home_joints = fa.get_joints()
     fa.dynamic_joint_velocity(joints=home_joints,

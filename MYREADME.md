@@ -243,6 +243,11 @@
 * **0702**
     * 完成`my_adaptive_control.py`,但是哪怕是准确的Js不更新也会分段到达图像空间中的目标点，这是不应该的，如果Js准确应该笔直到达目标点。应该是marker的位置不是夹爪的问题。
 
+* **0704**
+    * 发现0702的问题是和orientation region有冲突了，换了一个目标角度就没问题了
+    * 问题1： 不同region的项抵消的问题
+    * 问题2： ann效果不明显的问题
+
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
     * In scipy: `[x, y, z, w]`
