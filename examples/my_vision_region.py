@@ -786,7 +786,6 @@ def test_vision_region_control(fa):
         v = data_c.x1[1]-v0
         Js = np.array([[fx/depth,0,u/depth],[0,fy/depth,v/depth]]) @ R_c2b # 2x3
 
-
         dq_d_ = -J_pos_pinv @ (Js.T @ kesi_x)
 
         time_now = rospy.Time.now().to_time() - start_time

@@ -6,14 +6,14 @@ from franka_interface_msgs.msg import SensorDataGroup
 from frankapy import FrankaArm,SensorDataMessageType
 from frankapy import FrankaConstants as FC
 
-# import numpy as np
+import numpy as np
 # import math
 
 # from pyquaternion import Quaternion
 
-fa = FrankaArm()
-joints = fa.get_joints()
-print(joints)
+# fa = FrankaArm()
+# joints = fa.get_joints()
+# print(joints)
 # pose = fa.get_pose()
 # print(pose)
 # print(pose.position)
@@ -39,4 +39,5 @@ print(joints)
 # q = Quaternion(0.026593157042844106,-0.006128866589368008,0.9995994598686369,0.00749405251881394)
 # print(q.rotation_matrix)
 # 相机标定信息在/home/roboticslab/.ros/easy_handeye/中
-
+# np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=1)
+print(np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=0))
