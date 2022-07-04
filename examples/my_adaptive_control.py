@@ -555,7 +555,7 @@ def test_adaptive_region_control(fa, allow_update=False):
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionController(fa)
     
-    pre_traj = "./data/0704/my_adaptive_control/allow_true_L_2000/"
+    pre_traj = "./data/0704/my_adaptive_control/allow_false/"
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -752,6 +752,6 @@ def test_adaptive_region_control(fa, allow_update=False):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    test_adaptive_region_control(fa=fa, allow_update=True)
+    test_adaptive_region_control(fa=fa, allow_update=False)
     # plot_figures()
     
