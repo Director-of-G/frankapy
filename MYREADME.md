@@ -240,6 +240,13 @@
       * 不使用ANN，收敛较快，超调明显
     * 数据在`./data/0701`下，`./with adaptive`和`./with no adaptive`两个文件夹分别包含使用ANN和不使用ANN下的实验结果，能够看到上述对比效果。运行test_adaptive_region_control，会绘图显示更新后的权重矩阵$W$，并在`./data/0701`中给出`data_with_adaptive.pkl`和`data_with_no_adaptive.pkl`文件记录数据，注意修改存放记录的文件夹名称。
 
+* **0703**
+    * 修改了AdaptiveRegionControllerSim中的Image Jacobian，即图像平面和Marker的Body Twist空间的投影矩阵
+    * 目前还没有找到一组合适的参数，让有adaptive和无adaptive时有明显差异
+    * 图像平面marker到目标点在x和y两个维度上收敛的速度可能有差异，导致x或y坐标之一先收敛，另一者随后收敛，marker中心在图像平面的轨迹未必是直线，可以在`set_Kv(np.array([[0.2, 0.1]]))`中调节不同维的增益参数
+    * 使用修改后的$Js$，需要额外做几件事情：
+      * `AdaptiveRegionControllerSim`的`get_u`和`update`需要传入参数`p_s`，他是夹爪中心到marker中心的translation在world坐标系中的值，只要测量该translation在`panda_EE`中的值，参考`test_adaptive_region_control`中`get_u`和`update`两个函数前的`# 示例：计算p_s`的操作即可。注意`AdaptiveRegionControllerSim`的`__init__`中也需根据实机修改`p_s`
+
 
 
 ### Warning

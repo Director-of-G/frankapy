@@ -8,7 +8,6 @@ from matplotlib.contour import ContourLabeler
 # from frankapy.franka_arm import FrankaArm
 import rospy
 from pathlib import Path
-# import tf
 
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -44,10 +43,10 @@ class MyConstantsSim(object):
         @ Class: MyConstants
         @ Function: get all the constants in this file
     """
-    FX_HAT = 3759.66467
-    FY_HAT = 3759.66467
-    U0 = 960.5
-    V0 = 540.5
+    FX_HAT = 3759.66467 + 1000
+    FY_HAT = 3759.66467 - 1000
+    U0 = 960.5 + 400
+    V0 = 540.5 - 400
 
 class MyJacobianHandler(object):
     """
@@ -485,7 +484,7 @@ class AdaptiveRegionControllerSim(object):
         @ Function: copied and modified from AdaptiveImageJacobian, region controller with adaptive or precise Js
     """
     # def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
-    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
+    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None, allow_adaptive=False) -> None:
         # n_k_per_dim => the number of rbfs in each dimension
 
         if fa is None:
@@ -505,6 +504,15 @@ class AdaptiveRegionControllerSim(object):
         # Js here transforms Cartesian space BODY TWIST (v_b, w_b): 6 * 1 
         # to image space velocity (du, dv): 2 * 1
         # Js is 2 * 6, while Js[:,3:] = [0] because w_b do not actually affect (du, dv)
+
+        # calculation for image jacobian
+        self.allow_adaptive = allow_adaptive
+        self.R_b2c = np.array([[-1, 0,  0],
+                               [0,  1,  0],
+                               [0,  0, -1]])
+        self.base_Js = np.array([[MyConstantsSim.FX_HAT/1, 0,    -MyConstantsSim.U0/1, 0, 0, 0], \
+                                 [0,    MyConstantsSim.FY_HAT/1, -MyConstantsSim.V0/1, 0, 0, 0]])
+
         if Js is not None:
             if Js.shape != (2, 6):
                 raise ValueError('Dimension of Js should be (2, 6), not ' + str(Js.shape) + '!')
@@ -513,38 +521,33 @@ class AdaptiveRegionControllerSim(object):
             if x is None:
                 # raise ValueError('Target point x on the image plane should not be empty!')
                 x = np.array([1920/2,1080/2])
-            fx, fy = MyConstantsSim.FX_HAT + 200, MyConstantsSim.FY_HAT - 200
-            u0, v0 = MyConstantsSim.U0 - 50, MyConstantsSim.V0 + 50
-            u, v = x[0] - u0, x[1] - v0
-            z = 1
-            """
-                This Js seems wrong
+
+            # old version
             """
             # J_cam2img = np.array([[fx/z, 0,    -u/z, -u*v/fx,      (fx+u**2)/fx, -v], \
             #                       [0,    fy/z, -v/z, -(fy+v**2)/fy, u*v/fy,       u]])
-            """
-                This Js seems right
-            """
-            J_cam2img = np.array([[fx/z, 0,    -u/z, 0, 0, 0], \
-                                  [0,    fy/z, -v/z, 0, 0, 0]])
 
-            # my_jacobian_handler = ()
-            # J_base2cam = my_jacobian_handler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
-            # print(J_base2cam)
+            J_cam2img = np.array([[fx/z, 0,    -u/z, 0, 0, 0], \
+                                  [0,    fy/z, -v/z, 0, 0, 0]])  # body rotation with respect to origin might not affect pixel motion, set the last three columns to zero
 
             R_c2b = np.array([[-math.sqrt(2)/2, -math.sqrt(2)/2,  0],
                               [-math.sqrt(2)/2,  math.sqrt(2)/2,  0],
                               [0,                0,              -1]])# this R is causually estimated by yxj, not carefully measured.
-            J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
-            # print('J_base2cam',J_base2cam)
             
-            # rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
-            # (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked
-            # J_baserpy2w = np.block([[np.eye(3), np.zeros((3, 3))], \
-            #                         [np.zeros((3, 3)), np.array([[1, 0, math.sin(p)], \
-            #                                                      [0, math.cos(r), -math.cos(p) * math.sin(r)], \
-            #                                                      [0, math.sin(r), math.cos(p) * math.cos(r)]])]])
+            J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
             self.Js_hat = J_cam2img @ J_base2cam  # Js_hat = J_base2img
+            """
+
+            # new version
+            R_b2c = self.R_b2c
+            Js = self.base_Js
+            p_s = np.array([0.058690, 0.067458, -0.053400])  # panda_EE中marker中心的坐标
+            cross_mat = np.array([[0,        p_s[2], -p_s[1]],
+                                  [-p_s[2],  0,       p_s[0]],
+                                  [p_s[1],  -p_s[0],  0]])
+            Jrot = np.block([[R_b2c, R_b2c], [np.zeros((3, 6))]])
+            Jvel = np.block([[np.eye(3), np.zeros((3, 3))], [np.zeros((3, 3)), cross_mat]])
+            self.Js_hat = Js @ Jrot @ Jvel          
 
         if L is not None:
             if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
@@ -566,8 +569,8 @@ class AdaptiveRegionControllerSim(object):
         cfg = {'n_dim': 3,
                'n_k_per_dim': 10,
                'sigma': 1,
-            #    'pos_restriction': np.array([[-0.35, 0.30], [0.25, 0.65], [0.40, 0.70]]),
-               'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
+               'pos_restriction': np.array([[-0.35, 0.30], [0.25, 0.65], [0.40, 0.70]])}
+            #    'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
@@ -584,7 +587,6 @@ class AdaptiveRegionControllerSim(object):
         # self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # set by yxj | grasping pose on the right
         self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
         self.cartesian_quat_space_region.set_Ko(60)
-
 
         self.joint_space_region = JointSpaceRegion()
         # self.joint_space_region.add_region_multi(qc=np.array([1.48543711, -0.80891253, 1.79178384, -2.14672403, 1.74833518, 3.15085406, 2.50664708]), \
@@ -608,10 +610,24 @@ class AdaptiveRegionControllerSim(object):
     def get_theta(self, r):
         return self.theta.get_rbf_(r)
 
-    def get_Js_hat(self):
-        return self.Js_hat
+    def get_Js_hat(self, x, p_s=None):
+        # x is the pixel coordinate on the image plane
+        # p_s is the vector pointing from {NE}_origin to ArUco marker center
+        if p_s is None:
+            return self.Js_hat
+        else:
+            R_b2c = self.R_b2c
+            Js = self.base_Js
+            Js[0, 2], Js[1, 2] = -(x[0] - MyConstantsSim.U0) / 0.5, -(x[1] - MyConstantsSim.V0) / 0.5
+            cross_mat = np.array([[0,        p_s[2], -p_s[1]],
+                                  [-p_s[2],  0,       p_s[0]],
+                                  [p_s[1],  -p_s[0],  0]])
+            Jrot = np.block([[R_b2c, R_b2c], [np.zeros((3, 6))]])
+            Jvel = np.block([[np.eye(3), np.zeros((3, 3))], [np.zeros((3, 3)), cross_mat]])
 
-    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False):
+            return Js @ Jrot @ Jvel
+
+    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False, p_s=None):
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
@@ -627,20 +643,20 @@ class AdaptiveRegionControllerSim(object):
         kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
 
         if with_vision:
-            u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
-            # Js_hat_pinv = self.Js_hat.T @ np.linalg.inv(self.Js_hat @ self.Js_hat.T)  # try pseudo inverse of Js
+            if self.allow_adaptive:
+                Js_hat = self.Js_hat
+            else:
+                Js_hat = self.get_Js_hat(x, p_s=p_s)
+            
+            u = - J_pinv @ (Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
+            # Js_hat_pinv = Js_hat.T @ np.linalg.inv(Js_hat @ Js_hat.T)  # try pseudo inverse of Js
             # u = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
         else:
             u = - J_pinv @ (kesi_rall + J @ kesi_q)
 
-        # print('kesi_x', kesi_x)
-        # print('kesi_rall', kesi_rall)
-        # print('u_image_part', (- J_pinv @ (self.Js_hat.T @ kesi_x)).reshape(-1,))
-        # print('u_cartesian_part', (- J_pinv @ kesi_rall).reshape(-1,))
-        # print('u_joint_part', (- J_pinv @ (J_pinv.T @ kesi_q)).reshape(-1,))
         return u
 
-    def update(self, J=None, r_t=None, r_o=None, q=None, x=None): # used when adaptive, if u are precise, don't use it
+    def update(self, J=None, r_t=None, r_o=None, q=None, x=None, p_s=None): # used when adaptive, if u are precise, don't use it
         if self.fa is not None:
             r = self.fa.get_pose()  # get r: including translation and rotation matrix
             q = self.fa.get_joints()  # get q: joint angles
@@ -667,9 +683,17 @@ class AdaptiveRegionControllerSim(object):
             """
                 Initial Method #3
             """
-            for r_idx in range(self.W_hat.shape[0]):
-                self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
-            print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
+            # for r_idx in range(self.W_hat.shape[0]):
+            #     self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
+            # print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
+            # self.W_init_flag = True
+            """
+                Initial Method #4
+                With the modified image Jacobian
+            """
+            Js_hat = self.get_Js_hat(x=x, p_s=p_s)
+            for r_idx in range(self.W_hat.shape[0]):  # assigned with the same value in single line of W 
+                self.W_hat[r_idx, :] = (Js_hat.flatten()[r_idx] / np.sum(theta))
             self.W_init_flag = True
         
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
@@ -691,7 +715,6 @@ class AdaptiveRegionControllerSim(object):
         temp_Js_hat = self.W_hat @ theta  # (12, 1)
         # np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T
         self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
-        print((self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T)
 
 class JointOutputRegionControl(object):
     # def __init__(self, sim_or_real='sim', fa: FrankaArm=None) -> None:
@@ -1245,7 +1268,7 @@ def test_adaptive_region_control(allow_update=False):
     desired_position_bias = -np.array([240, 160])
 
     data_c = data_collection()
-    controller_adaptive = AdaptiveRegionControllerSim()
+    controller_adaptive = AdaptiveRegionControllerSim(allow_adaptive=allow_update)
     
     nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     pub_ = rospy.Publisher('/gazebo_sim/joint_velocity_desired', Float64MultiArray, queue_size=10)
@@ -1262,7 +1285,7 @@ def test_adaptive_region_control(allow_update=False):
             controller_adaptive.image_space_region.set_x_d(data_c.x2 + desired_position_bias)
             # print("1111",controller_adaptive.image_space_region.x_d)
             # controller_adaptive.image_space_region.set_b(50)
-            controller_adaptive.image_space_region.set_Kv(0.2)
+            controller_adaptive.image_space_region.set_Kv(np.array([[0.2, 0.1]]))
             print('vision region is set!')
             break
 
@@ -1294,12 +1317,17 @@ def test_adaptive_region_control(allow_update=False):
             unless the marker attached to gripper is seen
             donnot update Js and exclude it from calculating dq_d_
         """
+        # 示例：计算p_s
+        ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
+        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
+        p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
         if data_c.is_data_with_vision_1_ready():
-            dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True)
+            dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True, p_s=p_s.reshape(-1,))
             if allow_update:
-                controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1)
+                controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1, p_s=p_s.reshape(-1,))
         else:
-            dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=False)
+            dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=False, p_s=p_s.reshape(-1,))
         print('Js: ', controller_adaptive.Js_hat)
 
         msg = Float64MultiArray()
@@ -1311,7 +1339,7 @@ def test_adaptive_region_control(allow_update=False):
         pixel_1_list.append(data_c.x1)
         pixel_2_list.append(data_c.x2 + desired_position_bias)
         f_list.append(controller_adaptive.image_space_region.fv(data_c.x1))
-        p_list.append(controller_adaptive.image_space_region.Pv(data_c.x1))
+        p_list.append(controller_adaptive.image_space_region.Pv(data_c.x1).squeeze())
         kesi_x_list.append(controller_adaptive.image_space_region.kesi_x(data_c.x1).reshape((-1,)))
 
         f_quat_list.append(controller_adaptive.cartesian_quat_space_region.fo(Quat(data_c.quat)))
@@ -1330,7 +1358,7 @@ def test_adaptive_region_control(allow_update=False):
         
         rate_.sleep()
 
-    pre_traj = './data/0701/'
+    pre_traj = './data/0703/'
     
     # vision part
     plt.figure()
@@ -1404,8 +1432,9 @@ def test_adaptive_region_control(allow_update=False):
             'kesi_rall_list':kesi_rall_list,\
             'position_list':position_list, \
             'adaptive_weight_matrix':controller_adaptive.W_hat}
-    with open('./data/0701/data_withno_adaptive.pkl', 'wb') as f:
+    with open('./data/0703/data_withno_adaptive.pkl', 'wb') as f:
         pickle.dump(info, f)
+        pass
 
 
 def plot_figures():
@@ -1450,9 +1479,9 @@ def plot_figures2():
 
 def plot_figures3():
     import pickle
-    with open('./data/0701/data_with_adaptive.pkl', 'rb') as f:
+    with open('./data/0703/data_with_adaptive.pkl', 'rb') as f:
         data1 = pickle.load(f)
-    with open('./data/0701/data_withno_adaptive.pkl', 'rb') as f:
+    with open('./data/0703/data_withno_adaptive.pkl', 'rb') as f:
         data2 = pickle.load(f)
     desired_position_bias = np.array([240, 160])
     plt.figure()
@@ -1484,7 +1513,7 @@ def plot_figures3():
 
     plt.title('vision trajectory')
     plt.legend(['with adaptive', 'with no adaptive'])
-    plt.savefig('./data/0701/test_Cartesian_space_region.png', dpi=600)
+    plt.savefig('./data/0703/test_Cartesian_space_region.png', dpi=600)
     plt.show()
 
 if __name__ == '__main__':
@@ -1528,5 +1557,5 @@ if __name__ == '__main__':
 
     # yxj 20220623
     # nh_ = rospy.init_node('joint_space_region_testbench', anonymous=True)
-    test_adaptive_region_control(allow_update=True)
+    test_adaptive_region_control(allow_update=False)
     # plot_figures3()
