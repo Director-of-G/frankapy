@@ -32,6 +32,8 @@ from franka_interface_msgs.msg import SensorDataGroup
 from frankapy import FrankaArm,SensorDataMessageType
 from frankapy import FrankaConstants as FC
 
+from geometry_msgs.msg import PointStamped
+
 # Definition of Constants
 class MyConstants(object):
     """
@@ -687,7 +689,181 @@ def test_cartesian_joint_space_region_control(fa):
     with open(pre_traj+'all_data.pkl', 'wb') as f:
         pickle.dump(info, f)
 
+def test_vision_region_control(fa):
+    class vision_collection(object):
+        def __init__(self) -> None:
+            self.vision_1_ready = False
+            self.vision_2_ready = False
+            self.x1 = np.array([-1000,-1000])
+            self.x2 = np.zeros((2,))
 
+        def vision_1_callback(self, msg):
+            self.x1 = np.array([msg.point.x,msg.point.y])
+            if not self.vision_1_ready:
+                self.vision_1_ready = True
+
+        def vision_2_callback(self, msg):
+            self.x2 = np.array([msg.point.x,msg.point.y])
+            if not self.vision_2_ready:
+                self.vision_2_ready = True
+
+        def is_data_without_vision_1_ready(self):
+            return self.vision_2_ready
+
+        def is_data_with_vision_1_ready(self):
+            return self.vision_1_ready & self.vision_2_ready
+    
+    desired_position_bias = np.array([-200, -100])
+    data_c = vision_collection()
+    controller_x = ImageSpaceRegion(b=np.array([1920,1080]))
+    
+    pre_traj = "./data/0704/my_vision_region/allow_false/"
+
+    sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
+    sub_vision_2_ = rospy.Subscriber('/aruco_simple/pixel2', PointStamped, data_c.vision_2_callback, queue_size=1)
+    pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+    rate_ = rospy.Rate(100)
+
+    # move to the place where the camera can see the ee aruco marker
+    target_joint = [0.80492297,-0.58386596,0.30586097,-2.71391148,0.64828513,2.52442803,-0.0742324]
+    fa.goto_joints(target_joint, joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES,ignore_virtual_walls = True)
+
+    # init control scheme
+    print('i have reached the desired initial pos!')
+    if data_c.is_data_with_vision_1_ready():
+        target = data_c.x2
+        target[0] = target[0]+desired_position_bias[0]
+        target[1] = target[1]+desired_position_bias[1]
+        controller_x.set_x_d(target)
+        # controller_x.set_b(50)
+        controller_x.set_Kv(0.2)
+        print('Vision region is set!')
+
+
+    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
+    q_and_manipubility_list = np.zeros((0, 8))
+
+    fx = MyConstants.FX_HAT
+    fy = MyConstants.FY_HAT
+    u0 = MyConstants.U0
+    v0 = MyConstants.V0  
+    
+    R_c2b =  np.array([[-1, 0,  0],
+            [0, 1, 0],
+            [0, 0, -1]])      
+    depth = 1
+
+
+    # print('Js',Js)
+    max_execution_time = 20.0
+
+    home_joints = fa.get_joints()
+    fa.dynamic_joint_velocity(joints=home_joints,
+                                joints_vel=np.zeros((7,)),
+                                duration=max_execution_time,
+                                buffer_time=10,
+                                block=False)
+    i=0
+
+    start_time = time.time() 
+    # update control scheme
+    while not rospy.is_shutdown():
+        q_and_m = np.zeros((1, 8))
+        q_and_m[0, :7] = fa.get_joints()
+        J = fa.get_jacobian(q_and_m[0, :7])
+        det = np.linalg.det(J @ J.T)
+        q_and_m[0, 7] = math.sqrt(np.abs(det))
+        q_and_manipubility_list = np.concatenate((q_and_manipubility_list, q_and_m), axis=0)
+
+        kesi_x = controller_x.kesi_x(data_c.x1)
+        kesi_x = kesi_x.reshape((2,1))
+
+        J_pos = J[:3,:] # 3x7
+        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7x6)
+        J_pos_pinv = J_pos.T @ np.linalg.inv(J_pos @ J_pos.T) # 7x3
+        
+        u = data_c.x1[0]-u0
+        v = data_c.x1[1]-v0
+        Js = np.array([[fx/depth,0,u/depth],[0,fy/depth,v/depth]]) @ R_c2b # 2x3
+
+
+        dq_d_ = -J_pos_pinv @ (Js.T @ kesi_x)
+
+        time_now = rospy.Time.now().to_time() - start_time
+        traj_gen_proto_msg = JointPositionVelocitySensorMessage(
+            id=i, timestamp=time_now, 
+            seg_run_time=max_execution_time,
+            joints=home_joints,
+            joint_vels=dq_d_.reshape(7,).tolist()
+        )
+        ros_msg = make_sensor_group_msg(
+            trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+                traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION_VELOCITY)
+        )
+        i += 1
+        rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+        pub.publish(ros_msg)
+
+        # logging
+        time_list.append(time.time()-start_time)
+        pixel_1_list.append(data_c.x1)
+        pixel_2_list.append(data_c.x2)
+        f_list.append(controller_x.fv(data_c.x1))
+        p_list.append(controller_x.Pv(data_c.x1))
+        kesi_x_list.append(kesi_x.reshape(2,))
+
+        if time.time() - start_time >= max_execution_time:
+            term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - start_time, should_terminate=True)
+            ros_msg = make_sensor_group_msg(
+            termination_handler_sensor_msg=sensor_proto2ros_msg(
+                term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
+            )
+            pub.publish(ros_msg)
+            break
+
+            # print(kesi_r)
+            # print(kesi_rq)
+        
+        rate_.sleep()
+
+    pre_traj = './data/0704/my_vision_region/'
+    
+    # vision part
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.plot(time_list, f_list, color='b',label = 'f')
+    plt.plot(time_list, p_list, color='r',label = 'P')
+    plt.title('f and P for vision region')
+    plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(time_list,kesi_x_list,label = 'kesi')
+    plt.title('kesi_x')
+    plt.savefig(pre_traj+'f_P_kesi_x.jpg')
+
+    plt.figure()
+    plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
+    plt.plot(time_list, pixel_2_list,color='r',label = 'desired position')
+    plt.legend()
+    plt.title('vision position vs time')
+    plt.savefig(pre_traj+'vision_position.jpg')
+
+    plt.figure()
+    plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b',label = 'vision trajectory')
+    plt.scatter(target[0], target[1],color='r',label = 'desired position')
+    plt.legend()
+    plt.title('vision trajectory')
+    plt.savefig(pre_traj+'vision_trajectory.jpg')
+
+    plt.show()
+    info = {'f_list': f_list, \
+            'p_list': p_list, \
+            'kesi_x_list': kesi_x_list, \
+            'pixel_1_list': pixel_1_list, \
+            'pixel_2_list': pixel_2_list, \
+            'time_list': time_list, \
+            'q_and_manipubility_list':q_and_manipubility_list}
+    with open(pre_traj + 'data.pkl', 'wb') as f:
+        pickle.dump(info, f)
 
 
 if __name__ == '__main__':
@@ -723,7 +899,6 @@ if __name__ == '__main__':
     # plt.show()
 
     fa = FrankaArm()
-    # test_joint_space_region_control(fa=fa)
-    # test_cartesian_joint_space_region_control(fa=fa)
+    test_vision_region_control(fa=fa)
     # plot_figures()
     

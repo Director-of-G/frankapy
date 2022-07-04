@@ -498,6 +498,7 @@ def test_precise_region_control(fa):
     controller_adaptive = KnownImageJacobian(fa)
     
     pre_traj = "./data/0630/my_precise_control/"
+    desired_position_bias = np.array([-200, -100])
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -510,8 +511,8 @@ def test_precise_region_control(fa):
     while 1:
         if data_c.is_data_without_vision_1_ready():
             target = data_c.x2
-            target[0] = target[0]-200
-            target[1] = target[1]-100
+            target[0] = target[0]+desired_position_bias[0]
+            target[1] = target[1]+desired_position_bias[1]
             controller_adaptive.image_space_region.set_x_d(target)
             controller_adaptive.image_space_region.set_Kv(0.2)
             print('vision region is set!')
@@ -609,7 +610,7 @@ def test_precise_region_control(fa):
 
     plt.figure()
     plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
-    plt.plot(time_list, pixel_2_list,color='r',label = 'desired position')
+    plt.plot(time_list, pixel_2_list+desired_position_bias,color='r',label = 'desired position')
     plt.legend()
     plt.title('vision position vs time')
     plt.savefig(pre_traj+'vision_position.jpg')

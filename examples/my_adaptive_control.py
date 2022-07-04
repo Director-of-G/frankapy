@@ -477,9 +477,7 @@ class AdaptiveRegionControllerSim(object):
         # n_k_per_dim => the number of rbfs in each dimension
 
         if fa is None:
-            # raise ValueError('FrankaArm handle is not provided!')
-            print('-------simulation-------')
-            self.fa = None
+            raise ValueError('FrankaArm handle is not provided!')
         else:
             self.fa = fa
 
@@ -559,11 +557,7 @@ class AdaptiveRegionControllerSim(object):
             # raise ValueError('Matrix W_hat should not be empty!')
         self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
 
-        cfg = {'n_dim': 3,
-               'n_k_per_dim': 10,
-               'sigma': 1,
-            #    'pos_restriction': np.array([[-0.35, 0.30], [0.25, 0.65], [0.40, 0.70]]),
-               'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
+        cfg = {'n_dim': 3,'n_k_per_dim': 10,'sigma': 1,'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
@@ -576,9 +570,10 @@ class AdaptiveRegionControllerSim(object):
         # self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
         self.cartesian_space_region.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
 
-        # self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # set by yxj | grasping pose on the right
-        self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
-        self.cartesian_quat_space_region.set_Ko(60)
+        # self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
+        # self.cartesian_quat_space_region.set_Ko(60)
+        self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
+        self.cartesian_quat_space_region.set_Ko(15)
 
 
         self.joint_space_region = JointSpaceRegion()
@@ -620,6 +615,9 @@ class AdaptiveRegionControllerSim(object):
         self.kesi_rall = kesi_rall
 
         kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
+
+        print("kesi_x",kesi_x)
+        print("kesi_rall",kesi_rall)
 
         if with_vision:
             u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
@@ -717,7 +715,7 @@ def test_adaptive_region_control(fa, allow_update=False):
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionControllerSim(fa)
     
-    pre_traj = "./data/0704/my_adaptive_control/allow_false/"
+    pre_traj = "./data/0704/my_adaptive_control/allow_true/"
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -740,11 +738,11 @@ def test_adaptive_region_control(fa, allow_update=False):
             break
 
 
-    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
+    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list, Js_list=[], [], [], [], [], [], []
     q_and_manipubility_list = np.zeros((0, 8))
     f_quat_list,p_quat_list,quat_list,kesi_rall_list,position_list = [],[],[],[],[]
 
-    max_execution_time = 20.0
+    max_execution_time = 25.0
 
     home_joints = fa.get_joints()
     fa.dynamic_joint_velocity(joints=home_joints,
@@ -803,6 +801,7 @@ def test_adaptive_region_control(fa, allow_update=False):
         f_list.append(controller_adaptive.image_space_region.fv(data_c.x1))
         p_list.append(controller_adaptive.image_space_region.Pv(data_c.x1))
         kesi_x_list.append(controller_adaptive.image_space_region.kesi_x(data_c.x1).reshape((-1,)))
+        Js_list.append(controller_adaptive.Js_hat.reshape(-1,))
 
         f_quat_list.append(controller_adaptive.cartesian_quat_space_region.fo(Quat(pose.quaternion)))
         p_quat_list.append(controller_adaptive.cartesian_quat_space_region.Po(Quat(pose.quaternion)))
@@ -819,9 +818,7 @@ def test_adaptive_region_control(fa, allow_update=False):
             )
             pub.publish(ros_msg)
             break
-            # print(kesi_r)
-            # print(kesi_rq)
-        
+
         rate_.sleep()
 
     
@@ -839,8 +836,9 @@ def test_adaptive_region_control(fa, allow_update=False):
 
     plt.figure()
     plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
-    plt.plot(time_list, pixel_2_list,color='r',label = 'desired position')
+    plt.plot(time_list, pixel_2_list-desired_position_bias,color='r',label = 'desired position')
     plt.legend()
+    plt.ylim([0,1440])
     plt.title('vision position vs time')
     plt.savefig(pre_traj+'vision_position.jpg')
 
@@ -887,6 +885,13 @@ def test_adaptive_region_control(fa, allow_update=False):
     plt.title('kesi for 6 dimensions')
     plt.savefig(pre_traj+'cartesian_kesi.jpg')
 
+    plt.figure()
+    for i in range(12):
+        plt.subplot(4,3,i+1)
+        plt.plot(time_list,np.array(Js_list)[:,i],label = 'kesi')
+    plt.suptitle('Js')
+    plt.savefig(pre_traj+'Js.jpg')
+
     plt.show()
     info = {'f_list': f_list, \
             'p_list': p_list, \
@@ -899,7 +904,8 @@ def test_adaptive_region_control(fa, allow_update=False):
             'f_quat_list':f_quat_list,\
             'p_quat_list':p_quat_list,\
             'kesi_rall_list':kesi_rall_list,\
-            'position_list':position_list}
+            'position_list':position_list,\
+            'Js_list':Js_list}
     with open(pre_traj + 'data.pkl', 'wb') as f:
         pickle.dump(info, f)
 
@@ -907,6 +913,6 @@ def test_adaptive_region_control(fa, allow_update=False):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    test_adaptive_region_control(fa=fa, allow_update=False)
+    test_adaptive_region_control(fa=fa, allow_update=True)
     # plot_figures()
     
