@@ -44,7 +44,7 @@ class MyConstants(object):
     FY_HAT = 2341.164794921875
     U0 = 746.3118044533257
     V0 = 564.2590475570069
-    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.2342875493162069])
+    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.1342875493162069])
 
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
@@ -268,8 +268,6 @@ class JointSpaceRegion(object):
         fqr_multi = np.sum(((q_scale_multi - self.multi_qc) ** 2) * self.multi_mask, axis=0) - self.multi_qrbound ** 2  # (1, n_multi)
         fq_multi = fq_multi * self.multi_inout  # (1, n_multi)
         fqr_multi = fqr_multi * self.multi_inout  # (1, n_multi)
-
-        # print(fq_single, fqr_single, fq_multi, fqr_multi)
 
         return fq_single.reshape(1, n_single), fqr_single.reshape(1, n_single), \
                 fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
@@ -503,8 +501,10 @@ class AdaptiveRegionControllerSim(object):
             if x is None:
                 # raise ValueError('Target point x on the image plane should not be empty!')
                 x = np.array([1440/2,1080/2])
-            fx, fy = MyConstants.FX_HAT + 200, MyConstants.FY_HAT - 200
-            u0, v0 = MyConstants.U0 - 50, MyConstants.V0 + 50
+            fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT 
+            u0, v0 = MyConstants.U0, MyConstants.V0 
+            fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT 
+            u0, v0 = MyConstants.U0 , MyConstants.V0
             u, v = x[0] - u0, x[1] - v0
             z = 1
             """
@@ -527,6 +527,12 @@ class AdaptiveRegionControllerSim(object):
                 [-0.05325687,  0.01465613, -0.99847329]])
             J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
             # print('J_base2cam',J_base2cam)
+
+            p_m2ne = np.array([0.067, 0.08, 0.05])
+            R_m2ne = np.array([[0, -p_m2ne[2], p_m2ne[1]], \
+                                [p_m2ne[2], 0, -p_m2ne[0]], \
+                                [-p_m2ne[1], p_m2ne[0], 0]])
+            J_p_cross = np.block([[np.eye(3),R_m2ne],[np.zeros((3,3)),np.zeros((3,3))]])
             
             # rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
             # (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked
@@ -534,7 +540,7 @@ class AdaptiveRegionControllerSim(object):
             #                         [np.zeros((3, 3)), np.array([[1, 0, math.sin(p)], \
             #                                                      [0, math.cos(r), -math.cos(p) * math.sin(r)], \
             #                                                      [0, math.sin(r), math.cos(p) * math.cos(r)]])]])
-            self.Js_hat = J_cam2img @ J_base2cam  # Js_hat = J_base2img
+            self.Js_hat = J_cam2img @ J_base2cam @ J_p_cross  # Js_hat = J_base2img
 
         if L is not None:
             if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
@@ -567,7 +573,8 @@ class AdaptiveRegionControllerSim(object):
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         self.cartesian_space_region.set_r_c(MyConstants.CARTESIAN_CENTER)  # set by jyp | grasping pose above the second object with marker
         self.cartesian_space_region.set_c(np.array([0.02, 0.02, 0.02]).reshape(1, 3))
-        self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
+        # self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
+        self.cartesian_space_region.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
 
         # self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # set by yxj | grasping pose on the right
         self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
@@ -657,7 +664,7 @@ class AdaptiveRegionControllerSim(object):
             """
             for r_idx in range(self.W_hat.shape[0]):
                 self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
-            print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
+            # print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
             self.W_init_flag = True
         
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
@@ -679,7 +686,7 @@ class AdaptiveRegionControllerSim(object):
         temp_Js_hat = self.W_hat @ theta  # (12, 1)
         # np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T
         self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
-        print((self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T)
+        # print((self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T)
 
 # 0702 yxj
 def test_adaptive_region_control(fa, allow_update=False):
@@ -710,7 +717,7 @@ def test_adaptive_region_control(fa, allow_update=False):
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionControllerSim(fa)
     
-    pre_traj = "./data/0702/my_adaptive_control/allow_false/"
+    pre_traj = "./data/0704/my_adaptive_control/allow_false/"
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -842,6 +849,8 @@ def test_adaptive_region_control(fa, allow_update=False):
     plt.scatter(target[0], target[1],color='r',label = 'desired position')
     plt.xlim([0,1440])
     plt.ylim([0,1080])
+    ax = plt.gca()
+    ax.invert_yaxis()
     plt.legend()
     plt.title('vision trajectory')
     plt.savefig(pre_traj+'vision_trajectory.jpg')
@@ -898,6 +907,6 @@ def test_adaptive_region_control(fa, allow_update=False):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    test_adaptive_region_control(fa=fa)
+    test_adaptive_region_control(fa=fa, allow_update=False)
     # plot_figures()
     

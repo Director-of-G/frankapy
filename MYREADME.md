@@ -240,7 +240,8 @@
       * 不使用ANN，收敛较快，超调明显
     * 数据在`./data/0701`下，`./with adaptive`和`./with no adaptive`两个文件夹分别包含使用ANN和不使用ANN下的实验结果，能够看到上述对比效果。运行test_adaptive_region_control，会绘图显示更新后的权重矩阵$W$，并在`./data/0701`中给出`data_with_adaptive.pkl`和`data_with_no_adaptive.pkl`文件记录数据，注意修改存放记录的文件夹名称。
 
-
+* **0702**
+    * 完成`my_adaptive_control.py`,但是哪怕是准确的Js不更新也会分段到达图像空间中的目标点，这是不应该的，如果Js准确应该笔直到达目标点。应该是marker的位置不是夹爪的问题。
 
 ### Warning
 1. The quaternion representation is different in scipy and RigidTransform, convertion is needed!
