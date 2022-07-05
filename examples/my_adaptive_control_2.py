@@ -467,7 +467,7 @@ class AdaptiveRegionController(object):
         print("kesi_rall",kesi_rall)
 
         if with_vision:
-            u = - J_pinv @ (kesi_rall + J @ kesi_q) -J_pos_pinv @ self.Js_hat.T @ kesi_x  # normal version in paper
+            u = - J_pinv @ (kesi_rall + J @ kesi_q) - J_pos_pinv @ self.Js_hat.T @ kesi_x  # normal version in paper
             # Js_hat_pinv = self.Js_hat.T @ np.linalg.inv(self.Js_hat @ self.Js_hat.T)  # try pseudo inverse of Js
             # u = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
         else:
@@ -509,7 +509,6 @@ class AdaptiveRegionController(object):
             """
             for r_idx in range(self.W_hat.shape[0]):
                 self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
-            # print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
             self.W_init_flag = True
         
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)

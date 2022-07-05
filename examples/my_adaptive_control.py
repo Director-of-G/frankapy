@@ -371,11 +371,14 @@ class AdaptiveRegionController(object):
             J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
             # print('J_base2cam',J_base2cam)
 
-            p_m2ne = np.array([0.067, 0.08, 0.05])
-            R_m2ne = np.array([[0, -p_m2ne[2], p_m2ne[1]], \
-                                [p_m2ne[2], 0, -p_m2ne[0]], \
-                                [-p_m2ne[1], p_m2ne[0], 0]])
-            J_p_cross = np.block([[np.eye(3),R_m2ne],[np.zeros((3,3)),np.zeros((3,3))]])
+            p_s_in_panda_EE = np.array([0.067, 0.08, -0.05])
+            ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+            ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+            p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3,1)
+            p_s_cross = np.array([[0, -p_s[2], p_s[1]], \
+                                [p_s[2], 0, -p_s[0]], \
+                                [-p_s[1], p_s[0], 0]])
+            J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
             
             # rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
             # (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked
@@ -390,7 +393,7 @@ class AdaptiveRegionController(object):
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            self.L = np.eye(1000) * 2000
+            self.L = np.eye(1000) * 5000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -441,7 +444,7 @@ class AdaptiveRegionController(object):
     def get_Js_hat(self):
         return self.Js_hat
 
-    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False):
+    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False, allow_update = True):
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
@@ -524,6 +527,7 @@ class AdaptiveRegionController(object):
         temp_Js_hat = self.W_hat @ theta  # (12, 1)
         # np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T
         self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
+        # self.Js_hat[:,3:] = np.zeros((2,3))
         # print((self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T)
 
 # 0702 yxj
@@ -555,7 +559,7 @@ def test_adaptive_region_control(fa, allow_update=False):
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionController(fa)
     
-    pre_traj = "./data/0704/my_adaptive_control/allow_false/"
+    pre_traj = "./data/0705/my_adaptive_control/allow_true_Js_2_3_L_5000/"
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)

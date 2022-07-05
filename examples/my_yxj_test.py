@@ -11,7 +11,7 @@ import numpy as np
 
 # from pyquaternion import Quaternion
 
-# fa = FrankaArm()
+fa = FrankaArm()
 # joints = fa.get_joints()
 # print(joints)
 # pose = fa.get_pose()
@@ -40,4 +40,8 @@ import numpy as np
 # print(q.rotation_matrix)
 # 相机标定信息在/home/roboticslab/.ros/easy_handeye/中
 # np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=1)
-print(np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=0))
+# print(np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=0))
+
+ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+print(fa.get_pose().quaternion)
+print(ee_pose_quat)

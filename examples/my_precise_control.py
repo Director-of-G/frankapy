@@ -347,13 +347,22 @@ class KnownImageJacobian(object):
             u0, v0 = MyConstants.U0, MyConstants.V0
             u, v = x[0] - u0, x[1] - v0
             z = 1
-            J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
+            self.J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
                                   [0, fy/z, -v/z, 0, 0, 0]])
-            R_c2b = np.array([[-1, 0,  0],
+            self.R_c2b = np.array([[-1, 0,  0],
             [0, 1, 0],
             [0, 0, -1]])            
             
-            self.Js_hat = J_cam2img @ np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])  # Js_hat = J_base2img
+            self.p_s_in_panda_EE = np.array([0.067, 0.08, -0.05])
+            ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+            ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+            p_s = ee_pose_mat @ self.p_s_in_panda_EE.reshape(3,1)
+            p_s_cross = np.array([[0, -p_s[2], p_s[1]], \
+                                [p_s[2], 0, -p_s[0]], \
+                                [-p_s[1], p_s[0], 0]])
+            J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
+
+            self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross # Js_hat = J_base2img
 
         # now we do not update Js!! yxj 0630
         # if L is not None:
@@ -409,6 +418,17 @@ class KnownImageJacobian(object):
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
 
         kesi_r = self.kesi_r(r_t.reshape(1, 3))  # (1, 3)
+
+        ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        p_s = ee_pose_mat @ self.p_s_in_panda_EE.reshape(3,1)
+        p_s_cross = np.array([[0, -p_s[2], p_s[1]], \
+                            [p_s[2], 0, -p_s[0]], \
+                            [-p_s[1], p_s[0], 0]])
+        J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
+
+        self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross
+
         if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
             kesi_rq = np.zeros((1, 3))
         else:
@@ -497,7 +517,7 @@ def test_precise_region_control(fa):
     data_c = vision_collection()
     controller_adaptive = KnownImageJacobian(fa)
     
-    pre_traj = "./data/0630/my_precise_control/"
+    pre_traj = "./data/0705/my_precise_control/2/"
     desired_position_bias = np.array([-200, -100])
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
@@ -595,7 +615,6 @@ def test_precise_region_control(fa):
         
         rate_.sleep()
 
-    
     # vision part
     plt.figure()
     plt.subplot(1, 2, 1)
@@ -612,6 +631,7 @@ def test_precise_region_control(fa):
     plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
     plt.plot(time_list, pixel_2_list+desired_position_bias,color='r',label = 'desired position')
     plt.legend()
+    plt.ylim([0,1440])
     plt.title('vision position vs time')
     plt.savefig(pre_traj+'vision_position.jpg')
 
@@ -620,6 +640,8 @@ def test_precise_region_control(fa):
     plt.scatter(target[0], target[1],color='r',label = 'desired position')
     plt.xlim([0,1440])
     plt.ylim([0,1080])
+    ax = plt.gca()
+    ax.invert_yaxis()
     plt.legend()
     plt.title('vision trajectory')
     plt.savefig(pre_traj+'vision_trajectory.jpg')
