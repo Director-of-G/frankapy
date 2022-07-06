@@ -369,6 +369,7 @@ class AdaptiveRegionController(object):
                 [-0.01185424,  0.99981255,  0.01530807],
                 [-0.05325687,  0.01465613, -0.99847329]])
             J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
+
             # print('J_base2cam',J_base2cam)
 
             p_s_in_panda_EE = np.array([0.067, 0.08, -0.05])
@@ -388,12 +389,15 @@ class AdaptiveRegionController(object):
             #                                                      [0, math.sin(r), math.cos(p) * math.cos(r)]])]])
             self.Js_hat = J_cam2img @ J_base2cam @ J_p_cross  # Js_hat = J_base2img
 
+            Js_hat_for_init = np.array([[-1000,0,-1000,-1000,-1000,1000],[0,1000,1000,-1000,-1000,1000]])
+            self.Js_hat = Js_hat_for_init
+
         if L is not None:
             if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            self.L = np.eye(1000) * 5000
+            self.L = np.eye(1000) * 1000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -449,6 +453,9 @@ class AdaptiveRegionController(object):
 
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
 
+        if with_vision:
+            self.cartesian_quat_space_region.set_Ko(1)
+
         kesi_r = self.kesi_r(r_t.reshape(1, 3))  # (1, 3)
         if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
             kesi_rq = np.zeros((1, 3))
@@ -459,8 +466,8 @@ class AdaptiveRegionController(object):
 
         kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
 
-        print("self.Js_hat.T @ kesi_x",self.Js_hat.T @ kesi_x)
-        print("kesi_rall",kesi_rall)
+        # print("self.Js_hat.T @ kesi_x",self.Js_hat.T @ kesi_x)
+        # print("kesi_rall",kesi_rall)
 
         if with_vision:
             u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
@@ -559,7 +566,7 @@ def test_adaptive_region_control(fa, allow_update=False):
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionController(fa)
     
-    pre_traj = "./data/0705/my_adaptive_control/allow_true_Js_2_3_L_5000/"
+    pre_traj = "./data/0705/my_adaptive_control/allow_true_jyp_L_1000/"
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -621,7 +628,7 @@ def test_adaptive_region_control(fa, allow_update=False):
                 controller_adaptive.update(J, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1)
         else:
             dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=False)
-        print('Js: ', controller_adaptive.Js_hat)
+        # print('Js: ', controller_adaptive.Js_hat)
         
         time_now = rospy.Time.now().to_time() - time_start
         traj_gen_proto_msg = JointPositionVelocitySensorMessage(
@@ -756,6 +763,6 @@ def test_adaptive_region_control(fa, allow_update=False):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    test_adaptive_region_control(fa=fa, allow_update=False)
+    test_adaptive_region_control(fa=fa, allow_update=True)
     # plot_figures()
     
