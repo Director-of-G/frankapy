@@ -9,6 +9,7 @@ from matplotlib.contour import ContourLabeler
 import rospy
 from pathlib import Path
 
+from torch.utils.tensorboard import SummaryWriter
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 import math
@@ -43,10 +44,10 @@ class MyConstantsSim(object):
         @ Class: MyConstants
         @ Function: get all the constants in this file
     """
-    FX_HAT = 3759.66467 + 1000
-    FY_HAT = 3759.66467 - 1000
-    U0 = 960.5 + 400
-    V0 = 540.5 - 400
+    FX_HAT = 3759.66467 + 800
+    FY_HAT = 3759.66467 + 800
+    U0 = 960.5 + 100
+    V0 = 540.5 - 100
 
 class MyJacobianHandler(object):
     """
@@ -526,10 +527,15 @@ class AdaptiveRegionControllerSim(object):
             """
             # J_cam2img = np.array([[fx/z, 0,    -u/z, -u*v/fx,      (fx+u**2)/fx, -v], \
             #                       [0,    fy/z, -v/z, -(fy+v**2)/fy, u*v/fy,       u]])
+            fx, fy = MyConstantsSim.FX_HAT, MyConstantsSim.FY_HAT
+            u0, v0 = MyConstantsSim.U0, MyConstantsSim.V0
+            z = 1
+            J_cam2img = np.array([[fx/z, 0,    -u0/z, 0, 0, 0], \
+                                  [0,    fy/z, -v0/z, 0, 0, 0]])  # body rotation with respect to origin might not affect pixel motion, set the last three columns to zero
 
-            J_cam2img = np.array([[fx/z, 0,    -u/z, 0, 0, 0], \
-                                  [0,    fy/z, -v/z, 0, 0, 0]])  # body rotation with respect to origin might not affect pixel motion, set the last three columns to zero
-
+            # R_c2b = np.array([[-1, 0,  0],
+            #                   [ 0, 1,  0],
+            #                   [ 0, 0, -1]])
             R_c2b = np.array([[-math.sqrt(2)/2, -math.sqrt(2)/2,  0],
                               [-math.sqrt(2)/2,  math.sqrt(2)/2,  0],
                               [0,                0,              -1]])# this R is causually estimated by yxj, not carefully measured.
@@ -539,6 +545,7 @@ class AdaptiveRegionControllerSim(object):
             """
 
             # new version
+            """
             R_b2c = self.R_b2c
             Js = self.base_Js
             p_s = np.array([0.058690, 0.067458, -0.053400])  # panda_EE中marker中心的坐标
@@ -547,14 +554,41 @@ class AdaptiveRegionControllerSim(object):
                                   [p_s[1],  -p_s[0],  0]])
             Jrot = np.block([[R_b2c, R_b2c], [np.zeros((3, 6))]])
             Jvel = np.block([[np.eye(3), np.zeros((3, 3))], [np.zeros((3, 3)), cross_mat]])
-            self.Js_hat = Js @ Jrot @ Jvel          
+            self.Js_hat = Js @ Jrot @ Jvel
+            """
+
+            # real world version
+            """
+            fx, fy = MyConstantsSim.FX_HAT, MyConstantsSim.FY_HAT
+            u, v = MyConstantsSim.U0, MyConstantsSim.V0
+            z = 1
+            J_cam2img = np.array([[fx/z, 0,    -u/z, 0, 0, 0],
+                                  [0,    fy/z, -v/z, 0, 0, 0]])
+
+            R_c2b = np.array([[-1, 0,  0],
+                              [0,  1,  0],
+                              [0,  0, -1]])
+            J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
+
+            p_s = np.array([0.058690, -0.067458, 0.053400])
+            p_s_cross = np.array([[0, -p_s[2], p_s[1]], \
+                                  [p_s[2], 0, -p_s[0]], \
+                                  [-p_s[1], p_s[0], 0]])
+            J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
+            
+            self.Js_hat = J_cam2img @ J_base2cam @ J_p_cross
+            """
+
+            # an unprecise version
+            self.Js_hat = np.array([[-1000, 0, -1000, -300, -300, 300],
+                                    [0, 1000, 1000, -300, -300, 300]])
 
         if L is not None:
             if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            self.L = np.eye(1000) * 5000
+            self.L = np.eye(1000) * 40000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -613,6 +647,10 @@ class AdaptiveRegionControllerSim(object):
     def get_Js_hat(self, x, p_s=None):
         # x is the pixel coordinate on the image plane
         # p_s is the vector pointing from {NE}_origin to ArUco marker center
+
+        Js = self.Js_hat
+        return Js
+
         if p_s is None:
             return self.Js_hat
         else:
@@ -633,10 +671,13 @@ class AdaptiveRegionControllerSim(object):
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
 
         kesi_r = self.kesi_r(r_t.reshape(1, 3))  # (1, 3)
-        if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
+        if with_vision:
             kesi_rq = np.zeros((1, 3))
         else:
-            kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
+            if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
+                kesi_rq = np.zeros((1, 3))
+            else:
+                kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
         kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
         self.kesi_rall = kesi_rall
 
@@ -691,9 +732,18 @@ class AdaptiveRegionControllerSim(object):
                 Initial Method #4
                 With the modified image Jacobian
             """
-            Js_hat = self.get_Js_hat(x=x, p_s=p_s)
+            # Js_hat = self.get_Js_hat(x=x, p_s=p_s)
+            # for r_idx in range(self.W_hat.shape[0]):  # assigned with the same value in single line of W 
+            #     self.W_hat[r_idx, :] = (Js_hat.flatten()[r_idx] / np.sum(theta))
+            # self.W_init_flag = True
+            """
+                Initial Method #5
+            """
+            Js_hat_for_init = np.array([[-2000, 0, -2000, -300, -300, 300],
+                                        [0, 2000, 2000, -300, -300, 300]])
             for r_idx in range(self.W_hat.shape[0]):  # assigned with the same value in single line of W 
-                self.W_hat[r_idx, :] = (Js_hat.flatten()[r_idx] / np.sum(theta))
+                self.W_hat[r_idx, :] = (Js_hat_for_init.flatten()[r_idx] / np.sum(theta))
+            self.Js_hat = Js_hat_for_init
             self.W_init_flag = True
         
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
@@ -1265,6 +1315,9 @@ def test_adaptive_region_control(allow_update=False):
         def is_data_with_vision_1_ready(self):
             return self.J_ready & self.q_ready & self.pose_ready & self.vision_1_ready & self.vision_2_ready
 
+    # launch Tensorboard
+    writer = SummaryWriter(log_dir='./data/0705/' + time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time())), flush_secs=5)
+    
     desired_position_bias = -np.array([240, 160])
 
     data_c = data_collection()
@@ -1293,8 +1346,13 @@ def test_adaptive_region_control(allow_update=False):
     q_and_manipubility_list = np.zeros((0, 8))
     f_quat_list,p_quat_list,quat_list,kesi_rall_list,position_list = [],[],[],[],[]
 
-    start_time = time.time() 
+    start_time = time.time()
+    Js_array = np.zeros((0, 12))
     # update control scheme
+    """
+        Task1: Set Point Control
+    """
+    cnt = 0
     while not rospy.is_shutdown():
         q_and_m = np.zeros((1, 8))
         q_and_m[0, :7] = data_c.q
@@ -1323,12 +1381,14 @@ def test_adaptive_region_control(allow_update=False):
         p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
         p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
         if data_c.is_data_with_vision_1_ready():
+            controller_adaptive.cartesian_quat_space_region.set_Ko(0)
             dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True, p_s=p_s.reshape(-1,))
             if allow_update:
                 controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1, p_s=p_s.reshape(-1,))
+                Js_array = np.concatenate((Js_array, controller_adaptive.Js_hat.reshape(1, 12)))
         else:
             dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=False, p_s=p_s.reshape(-1,))
-        print('Js: ', controller_adaptive.Js_hat)
+        print('Js: ', controller_adaptive.get_Js_hat(None, None))
 
         msg = Float64MultiArray()
         msg.data = dq_d_.reshape(7,)
@@ -1348,17 +1408,187 @@ def test_adaptive_region_control(allow_update=False):
         kesi_rall_list.append(controller_adaptive.kesi_rall)
         position_list.append(data_c.trans)
 
-        if time.time() - start_time >= 40.0:
+        # log to Tensorboard
+        # track the convergence of Js
+        if data_c.is_data_with_vision_1_ready():
+            if allow_update:
+                Js = controller_adaptive.Js_hat
+            else:
+                Js = controller_adaptive.get_Js_hat(x=data_c.x1, p_s=p_s)
+            log_dict = {}
+            for col in range(6):
+                log_dict[',{0})'.format(col + 1)] = Js[0, col]
+            writer.add_scalars('Js_r(0', log_dict, global_step=cnt)
+            log_dict.clear()
+            for col in range(6):
+                log_dict[',{0})'.format(col + 1)] = Js[1, col]
+            writer.add_scalars('Js_r(1', log_dict, global_step=cnt)
+
+            # track the tracking task performance
+            log_dir = {'goal_x': data_c.x2.squeeze()[0] + desired_position_bias[0],
+                        'pos_x': data_c.x1[0]}
+            writer.add_scalars('track_x', log_dir, global_step=cnt)
+            log_dir = {'goal_y': data_c.x2.squeeze()[1] + desired_position_bias[1],
+                        'pos_y': data_c.x1[1]}
+            writer.add_scalars('track_y', log_dir, global_step=cnt)
+
+            # track the convergence of weight matrix W
+            if allow_update:
+                fig = plt.figure()
+                plt.imshow((controller_adaptive.W_hat - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)) / (np.max(controller_adaptive.W_hat, axis=1).reshape(-1, 1) - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)))
+                writer.add_figure('matrix W', fig, global_step=cnt)
+
+        if time.time() - start_time >= 30.0:
+            """
             plt.imshow((controller_adaptive.W_hat - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)) / (np.max(controller_adaptive.W_hat, axis=1).reshape(-1, 1) - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)))
             plt.show()
-            break
 
-            # print(kesi_r)
-            # print(kesi_rq)
+            plt.figure()
+            for row in range(3):
+                for col in range(4):
+                    index = row * 4 + col + 1
+                    plt.subplot(3, 4, index)
+                    plt.plot(Js_array[:, index - 1])
+            plt.show()
+            """
+            break
         
+        cnt = cnt + 1
         rate_.sleep()
 
-    pre_traj = './data/0703/'
+    """
+        Task2: Spring-like trajectory tracking control
+    """
+    """
+    class spring_traj(object):
+        def __init__(self, x0:np.ndarray, pos_orient:np.ndarray, omega:float) -> None:
+            self.x0 = x0
+            self.pos_orient = pos_orient
+            self.omega = omega
+
+        def get_point(self, time:float):
+            return self.x0 + self.pos_orient * math.sin(self.omega * time)
+
+    print('Started to track spring like trajectory!')
+
+    start_time = time.time()  # restart timer
+    cnt = 0
+    # define the spring like trajectory
+    pos_orient = np.array([150, -100])
+    x0 = data_c.x2 + desired_position_bias + np.array([400, 300])
+    period = 20
+    omega = 2 * math.pi / period
+    traj = spring_traj(x0=x0,
+                        pos_orient=pos_orient,
+                        omega=omega)
+    while not rospy.is_shutdown():
+        track_goal = traj.get_point(time=time.time() - start_time).reshape(1, 2)
+        controller_adaptive.image_space_region.set_x_d(track_goal)
+
+        # 示例: 计算p_s
+        ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
+        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
+        p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
+        dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True, p_s=p_s.reshape(-1,))
+        if allow_update:
+            controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1, p_s=p_s.reshape(-1,))
+
+        # send joint velocity command to Franka
+        msg = Float64MultiArray()
+        msg.data = dq_d_.reshape(7,)
+        pub_.publish(msg)
+
+        # log to Tensorboard
+        if allow_update:
+            # track the convergence of Js
+            Js = controller_adaptive.Js_hat
+            log_dict = {}
+            for col in range(6):
+                log_dict['Js_{0}_{1}'.format(0, col + 1)] = Js[0, col]
+            writer.add_scalars('Js_r0', log_dict, global_step=cnt)
+            log_dict.clear()
+            for col in range(6):
+                log_dict['Js_{0}_{1}'.format(1, col + 1)] = Js[1, col]
+            writer.add_scalars('Js_r1', log_dict, global_step=cnt)
+
+            # track the tracking task performance
+            log_dir = {'goal_x': track_goal.squeeze()[0],
+                       'pos_x': data_c.x1[0]}
+            writer.add_scalars('track_x', log_dir, global_step=cnt)
+            log_dir = {'goal_y': track_goal.squeeze()[1],
+                       'pos_y': data_c.x1[1]}
+            writer.add_scalars('track_y', log_dir, global_step=cnt)
+
+            # track the convergence of weight matrix W
+            fig = plt.figure()
+            plt.imshow((controller_adaptive.W_hat - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)) / (np.max(controller_adaptive.W_hat, axis=1).reshape(-1, 1) - np.min(controller_adaptive.W_hat, axis=1).reshape(-1, 1)))
+            writer.add_figure('matrix W', fig, global_step=cnt)
+
+        if cnt >= 1000:
+            break
+        cnt = cnt + 1
+        rate_.sleep()
+    """
+
+    """
+        Task3: Circular trajectory tracking control
+    """
+    """
+    class circle_traj(object):
+        def __init__(self, center:np.ndarray, radius:int, omega:float) -> None:
+            self.center = center
+            self.radius = radius
+            self.omega = omega
+            
+        def get_point(self, time:float):
+            u = self.center[0] + self.radius * math.cos(self.omega * time)
+            v = self.center[1] + self.radius * math.sin(self.omega * time)
+
+            return np.array([u, v])
+
+    print('Started to track circular trajectory!')
+    print('x2: ', data_c.x2)
+    start_time = time.time()  # restart timer
+    cnt = 0
+    Js_array = np.zeros((0, 12))
+    while not rospy.is_shutdown():
+        # define the circular trajectory
+        radius = 300
+        center = data_c.x2 - np.array([radius, 0])
+        traj = circle_traj(center=center,
+                           radius=radius,
+                           omega=2 * math.pi / 25)
+        
+        track_goal = traj.get_point(time=time.time() - start_time).reshape(1, 2)
+        controller_adaptive.image_space_region.set_x_d(track_goal)
+
+        # 示例: 计算p_s
+        ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
+        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
+        p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
+        dq_d_ = controller_adaptive.get_u(J, d, data_c.trans, data_c.quat, data_c.q, data_c.x1, with_vision=True, p_s=p_s.reshape(-1,))
+        if allow_update:
+            controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1, p_s=p_s.reshape(-1,))
+            print('Js: ', controller_adaptive.Js_hat)
+
+        cnt = cnt + 1
+        if cnt % 20 == 0:
+            Js_array = np.concatenate((Js_array, controller_adaptive.Js_hat.reshape(1, 12)), axis=0)
+        if cnt % 5000 == 0:
+            pdb.set_trace()
+
+        msg = Float64MultiArray()
+        msg.data = dq_d_.reshape(7,)
+        pub_.publish(msg)
+
+        rate_.sleep()
+    """
+
+    # close Tensorboard
+    writer.close()
+    pre_traj = './data/0705/'
     
     # vision part
     plt.figure()
@@ -1557,5 +1787,5 @@ if __name__ == '__main__':
 
     # yxj 20220623
     # nh_ = rospy.init_node('joint_space_region_testbench', anonymous=True)
-    test_adaptive_region_control(allow_update=False)
+    test_adaptive_region_control(allow_update=True)
     # plot_figures3()
