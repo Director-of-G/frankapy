@@ -1,0 +1,1 @@
+ko = 15 -> ko = 10(enter the vision region)

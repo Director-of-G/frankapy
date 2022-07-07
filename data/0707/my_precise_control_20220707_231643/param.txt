@@ -1,0 +1,5 @@
+        if data_c.is_data_with_vision_1_ready():
+            if change_the_space_region_param is False:
+                controller_adaptive.cartesian_quat_space_region.set_Ko(0)
+                controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))
+                change_the_space_region_param = True

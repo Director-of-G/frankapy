@@ -34,6 +34,8 @@ from frankapy import FrankaConstants as FC
 
 from geometry_msgs.msg import PointStamped
 
+import os, sys
+
 # Definition of Constants
 class MyConstants(object):
     """
@@ -328,13 +330,7 @@ class KnownImageJacobian(object):
         # dimensions declaration
         self.m = 6  # the dimension of Cartesian space configuration r
         self.n_k = n_k_per_dim ** 3  # the dimension of rbf function θ(r)
-        # Js has three variables (x, y, z), 
-        # and (θi, θj, θk) do not actually affect Js, 
-        # when r is represented as body twist
 
-        # Js here transforms Cartesian space BODY TWIST (v_b, w_b): 6 * 1 
-        # to image space velocity (du, dv): 2 * 1
-        # Js is 2 * 6, while Js[3:, :] = [0] because w_b do not actually affect (du, dv)
         if Js is not None:
             if Js.shape != (2, 6):
                 raise ValueError('Dimension of Js should be (2, 6), not ' + str(Js.shape) + '!')
@@ -357,9 +353,9 @@ class KnownImageJacobian(object):
             ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
             ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
             p_s = ee_pose_mat @ self.p_s_in_panda_EE.reshape(3,1)
-            p_s_cross = np.array([[0, -p_s[2], p_s[1]], \
-                                [p_s[2], 0, -p_s[0]], \
-                                [-p_s[1], p_s[0], 0]])
+            p_s_cross = np.array([[0, -p_s[2,0], p_s[1,0]], \
+                                [p_s[2,0], 0, -p_s[0,0]], \
+                                [-p_s[1,0], p_s[0,0], 0]])
             J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
 
             self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross # Js_hat = J_base2img
@@ -409,10 +405,12 @@ class KnownImageJacobian(object):
     def get_theta(self, r):
         return self.theta.get_rbf_(r)
 
-    def get_Js_hat(self):
+    def get_Js_hat(self, x, p_s=None):
+        # x is the pixel coordinate on the image plane
+        # p_s is the vector pointing from {NE}_origin to ArUco marker center
         return self.Js_hat
 
-    def get_u(self,J,d,r_t,r_o,q,x):
+    def get_u(self,J,d,r_t,r_o,q,x,with_vision=False, p_s=None):
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
@@ -425,7 +423,6 @@ class KnownImageJacobian(object):
         z = 1
         self.J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
                                 [0, fy/z, -v/z, 0, 0, 0]])
-
         ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
         ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
         p_s = ee_pose_mat @ self.p_s_in_panda_EE.reshape(3,1)
@@ -436,23 +433,32 @@ class KnownImageJacobian(object):
 
         self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross
 
-        print("self.J_cam2img",self.J_cam2img)
-        print("2",np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]))
-        print("3",J_p_cross)
-        print("self.Js_hat",self.Js_hat)
+        # print("self.J_cam2img",self.J_cam2img)
+        # print("2",np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]))
+        # print("3",J_p_cross)
+        # print("self.Js_hat",self.Js_hat)
 
-        if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
+        if with_vision:
             kesi_rq = np.zeros((1, 3))
         else:
-            kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
+            if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
+                kesi_rq = np.zeros((1, 3))
+            else:
+                kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
         kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
         self.kesi_rall = kesi_rall
 
         kesi_q = self.kesi_q(q).reshape(7, 1)  # (7, 1)
 
-        u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
+        if with_vision:
+            Js_hat = self.get_Js_hat(x, p_s=p_s)
+            
+            u = - J_pinv @ (Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
+            # Js_hat_pinv = Js_hat.T @ np.linalg.inv(Js_hat @ Js_hat.T)  # try pseudo inverse of Js
+            # u = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall + J_pinv.T @ kesi_q)
+        else:
+            u = - J_pinv @ (kesi_rall + J @ kesi_q)
         return u
-
 
 class JointOutputRegionControl(object):
     def __init__(self, sim_or_real='sim', fa=None) -> None:
@@ -503,7 +509,8 @@ class JointOutputRegionControl(object):
 
 # 0630 yxj
 def test_precise_region_control(fa):
-    pre_traj = "./data/0706/my_precise_control_Js_2_3/"
+    pre_traj = "./data/0707/my_precise_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"/"
+    os.mkdir(pre_traj)
     class vision_collection(object):
         def __init__(self) -> None:
             self.vision_1_ready = False
@@ -553,11 +560,13 @@ def test_precise_region_control(fa):
             break
 
 
-    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list=[], [], [], [], [], []
+    f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list,Js_list=[], [], [], [], [], [], []
     q_and_manipubility_list = np.zeros((0, 8))
     f_quat_list,p_quat_list,quat_list,kesi_rall_list,position_list = [],[],[],[],[]
 
     max_execution_time = 25
+
+    change_the_space_region_param = False
 
     home_joints = fa.get_joints()
     fa.dynamic_joint_velocity(joints=home_joints,
@@ -582,7 +591,26 @@ def test_precise_region_control(fa):
 
         d = np.array([[0],[0],[0],[0],[0],[0]])
 
-        dq_d_ = controller_adaptive.get_u(J,d,pose.translation,pose.quaternion,q_and_m[0, :7],data_c.x1)
+        # 示例：计算p_s
+        ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        p_s_in_panda_EE = controller_adaptive.p_s_in_panda_EE
+        p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
+
+        if data_c.is_data_with_vision_1_ready():
+            if change_the_space_region_param is False:
+                controller_adaptive.cartesian_quat_space_region.set_Ko(0)
+                controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))
+                change_the_space_region_param = True
+            dq_d_ = controller_adaptive.get_u(J,d,pose.translation,pose.quaternion,q_and_m[0, :7],data_c.x1, with_vision=True, p_s=p_s.reshape(-1,))
+            # if allow_update:
+            #     controller_adaptive.update(J, data_c.trans, data_c.quat, data_c.q, data_c.x1, p_s=p_s.reshape(-1,))
+            #     Js_array = np.concatenate((Js_array, controller_adaptive.Js_hat.reshape(1, 12)))
+        else:
+            dq_d_ = controller_adaptive.get_u(J,d,pose.translation,pose.quaternion,q_and_m[0, :7],data_c.x1, with_vision=False, p_s=p_s.reshape(-1,))
+        print('Js: ', controller_adaptive.get_Js_hat(None, None))
+
+        # dq_d_ = controller_adaptive.get_u(J,d,pose.translation,pose.quaternion,q_and_m[0, :7],data_c.x1)
         
         time_now = rospy.Time.now().to_time() - time_start
         traj_gen_proto_msg = JointPositionVelocitySensorMessage(
@@ -606,6 +634,7 @@ def test_precise_region_control(fa):
         f_list.append(controller_adaptive.image_space_region.fv(data_c.x1))
         p_list.append(controller_adaptive.image_space_region.Pv(data_c.x1))
         kesi_x_list.append(controller_adaptive.image_space_region.kesi_x(data_c.x1).reshape((-1,)))
+        Js_list.append(controller_adaptive.Js_hat.reshape(-1,))
 
         f_quat_list.append(controller_adaptive.cartesian_quat_space_region.fo(Quat(pose.quaternion)))
         p_quat_list.append(controller_adaptive.cartesian_quat_space_region.Po(Quat(pose.quaternion)))
@@ -690,6 +719,13 @@ def test_precise_region_control(fa):
     plt.title('kesi for 6 dimensions')
     plt.savefig(pre_traj+'cartesian_kesi.jpg')
 
+    plt.figure()
+    for i in range(12):
+        plt.subplot(4,3,i+1)
+        plt.plot(time_list,np.array(Js_list)[:,i],label = 'kesi')
+    plt.suptitle('Js')
+    plt.savefig(pre_traj+'Js.jpg')
+
     plt.show()
     info = {'f_list': f_list, \
             'p_list': p_list, \
@@ -702,7 +738,8 @@ def test_precise_region_control(fa):
             'f_quat_list':f_quat_list,\
             'p_quat_list':p_quat_list,\
             'kesi_rall_list':kesi_rall_list,\
-            'position_list':position_list}
+            'position_list':position_list,\
+            'Js_list':Js_list}
     with open(pre_traj + 'data.pkl', 'wb') as f:
         pickle.dump(info, f)
 
