@@ -285,7 +285,8 @@ def test_Image_Jacobian():
 
             if data_c.is_data_with_vision_ready():
                 x = data_c.x
-                kesi_x = 1e6 * image_space_region.kesi_x(x).reshape(2, 1)
+                # Js_hat.T version
+                kesi_x = image_space_region.kesi_x(x).reshape(2, 1)
                 Js_hat = get_Js_hat(x, data_c).astype(np.float)  # (2, 6)
                 dq_d_ = - J_pinv @ (Js_hat.T @ kesi_x + kesi_rall.reshape(6, 1))
 
@@ -345,6 +346,44 @@ def test_Image_Jacobian():
         rate.sleep()
 
     writer.close()
+
+def plot_image_region_vector_field():
+    """
+        1. Plot vector field in the image plane.
+        2. For each position x in the image plane, project kesi_x
+           to Cartesian space, then project the intermediate
+           result to joint space.
+        3. Obtain jacobian from frankapy (python package), project
+           result of 2 to Cartesian space, as if it is executed on
+           Franka Emika.
+        4. Finally, project the resulting Cartesian velocity to
+           image plane, as the vector at x.
+    """
+
+    # hyper-parameters
+    IMG_W = 1920
+    IMG_H = 1080
+    NUM_W = 96
+    NUM_H = 54
+
+    W_LIST = np.linspace(0, IMG_W - 1, NUM_W).tolist()
+    H_LIST = np.linspace(0, IMG_H - 1, NUM_H).tolist()
+
+    image_space_region = ImageSpaceRegion(b=np.array([IMG_W, IMG_H]))
+    image_space_region.set_x_d(np.array([960.5, 540.5]))
+
+    z = 1  # Supposing z is fixed
+    vector_field = []
+    for v in H_LIST:
+        for u in W_LIST:
+            # get kesi_x
+            x = np.array([u, v]).reshape(1, 2)
+            kesi_x = image_space_region.kesi_x(x)
+
+            # get Js
+
+
+    
 
 
 if __name__ == '__main__':
