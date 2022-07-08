@@ -256,8 +256,17 @@
 
 ### 常用命令
 1. 启动仿真环境
+   * 启动Gazebo
    ```
    roslaunch franka_gazebo panda.launch x:=-0.5 world:=$(rospack find franka_gazebo)/world/stone.sdf controller:=joint_velocity_example_controller rviz:=true
+   ```
+   * 启动aruco_ros节点
+   ```
+   roslaunch aruco_ros double.launch
+   ```
+   * 启动rqt_image_view
+   ```
+   rosrun rqt_image_view rqt_image_view
    ```
 2. 跑仿真环境的控制器
    ```

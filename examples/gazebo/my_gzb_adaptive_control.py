@@ -545,7 +545,6 @@ class AdaptiveRegionControllerSim(object):
             """
 
             # new version
-            """
             R_b2c = self.R_b2c
             Js = self.base_Js
             p_s = np.array([0.058690, 0.067458, -0.053400])  # panda_EE中marker中心的坐标
@@ -555,7 +554,6 @@ class AdaptiveRegionControllerSim(object):
             Jrot = np.block([[R_b2c, R_b2c], [np.zeros((3, 6))]])
             Jvel = np.block([[np.eye(3), np.zeros((3, 3))], [np.zeros((3, 3)), cross_mat]])
             self.Js_hat = Js @ Jrot @ Jvel
-            """
 
             # real world version
             """
@@ -580,8 +578,10 @@ class AdaptiveRegionControllerSim(object):
             """
 
             # an unprecise version
-            self.Js_hat = np.array([[-1000, 0, -1000, -300, -300, 300],
-                                    [0, 1000, 1000, -300, -300, 300]])
+            """
+            self.Js_hat = np.array([[-5000, 0, -1000, -100, -100, 100],
+                                    [-300, 4500, 1000, -100, -100, 100]])
+            """
 
         if L is not None:
             if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
@@ -614,7 +614,7 @@ class AdaptiveRegionControllerSim(object):
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         # self.cartesian_space_region.set_r_c(np.array([-0.01624475011413961, 0.5786721263542499, 0.30532807964440667]))  # grasping pose on the right
         # self.cartesian_space_region.set_r_c(np.array([-0.0068108842682527, 0.611158320250102, 0.5342875493162069]))  # set by yxj
-        self.cartesian_space_region.set_r_c(np.array([-0.0011823860573642849, 0.43430624374805804, 0.569872105919327]))  # set by jyp | grasping pose above the second object with marker
+        self.cartesian_space_region.set_r_c(np.array([-0.0711823860573642849, 0.43430624374805804, 0.569872105919327]))  # set by jyp | grasping pose above the second object with marker
         self.cartesian_space_region.set_c(np.array([0.05, 0.05, 0.05]).reshape(1, 3))
         self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
 
@@ -648,8 +648,8 @@ class AdaptiveRegionControllerSim(object):
         # x is the pixel coordinate on the image plane
         # p_s is the vector pointing from {NE}_origin to ArUco marker center
 
-        Js = self.Js_hat
-        return Js
+        # Js = self.Js_hat
+        # return Js
 
         if p_s is None:
             return self.Js_hat
@@ -739,8 +739,8 @@ class AdaptiveRegionControllerSim(object):
             """
                 Initial Method #5
             """
-            Js_hat_for_init = np.array([[-2000, 0, -2000, -300, -300, 300],
-                                        [0, 2000, 2000, -300, -300, 300]])
+            Js_hat_for_init = np.array([[-5000, 0, -1000, -100, -100, 100],
+                                        [-300, 4500, 1000, -100, -100, 100]])
             for r_idx in range(self.W_hat.shape[0]):  # assigned with the same value in single line of W 
                 self.W_hat[r_idx, :] = (Js_hat_for_init.flatten()[r_idx] / np.sum(theta))
             self.Js_hat = Js_hat_for_init
@@ -1787,5 +1787,5 @@ if __name__ == '__main__':
 
     # yxj 20220623
     # nh_ = rospy.init_node('joint_space_region_testbench', anonymous=True)
-    test_adaptive_region_control(allow_update=True)
+    test_adaptive_region_control(allow_update=False)
     # plot_figures3()
