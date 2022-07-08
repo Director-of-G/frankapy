@@ -34,6 +34,8 @@ from frankapy import FrankaConstants as FC
 
 from geometry_msgs.msg import PointStamped
 
+import os, sys
+
 # Definition of Constants
 class MyConstants(object):
     """
@@ -512,7 +514,6 @@ class AdaptiveRegionController(object):
             """
             for r_idx in range(self.W_hat.shape[0]):
                 self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
-            # print("self.W_hat[r_idx, :]",self.W_hat[r_idx, :])# 一整行都是一个数？？
             self.W_init_flag = True
         
         J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
@@ -539,6 +540,8 @@ class AdaptiveRegionController(object):
 
 # 0702 yxj
 def test_adaptive_region_control(fa, allow_update=False):
+    pre_traj = "./data/0707/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"/"
+    os.mkdir(pre_traj)
     class vision_collection(object):
         def __init__(self) -> None:
             self.vision_1_ready = False
@@ -565,8 +568,6 @@ def test_adaptive_region_control(fa, allow_update=False):
     desired_position_bias = np.array([-200, -100])
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionController(fa)
-    
-    pre_traj = "./data/0705/my_adaptive_control/allow_true_jyp_L_1000/"
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -603,6 +604,8 @@ def test_adaptive_region_control(fa, allow_update=False):
                                 block=False)
     i=0
 
+    change_the_space_region_param = False
+
     time_start = rospy.Time.now().to_time()
     
     # update control scheme
@@ -623,6 +626,10 @@ def test_adaptive_region_control(fa, allow_update=False):
             donnot update Js and exclude it from calculating dq_d_
         """
         if data_c.is_data_with_vision_1_ready():
+            if change_the_space_region_param is False:
+                controller_adaptive.cartesian_quat_space_region.set_Ko(0)
+                controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))
+                change_the_space_region_param = True
             dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=True)
             if allow_update:
                 controller_adaptive.update(J, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1)

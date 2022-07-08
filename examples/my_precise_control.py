@@ -359,7 +359,10 @@ class KnownImageJacobian(object):
             J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
 
             self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross # Js_hat = J_base2img
-
+            
+            # ========================
+            Js_hat_for_init = np.array([[-1000,0,-1000,-1000,-1000,1000],[0,1000,1000,-1000,-1000,1000]])
+            self.Js_hat = Js_hat_for_init
         # now we do not update Js!! yxj 0630
         # if L is not None:
         #     if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
@@ -417,21 +420,21 @@ class KnownImageJacobian(object):
 
         kesi_r = self.kesi_r(r_t.reshape(1, 3))  # (1, 3)
 
-        fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT
-        u0, v0 = MyConstants.U0, MyConstants.V0
-        u, v = x[0] - u0, x[1] - v0
-        z = 1
-        self.J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
-                                [0, fy/z, -v/z, 0, 0, 0]])
-        ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
-        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
-        p_s = ee_pose_mat @ self.p_s_in_panda_EE.reshape(3,1)
-        p_s_cross = np.array([[0, -p_s[2,0], p_s[1,0]], \
-                            [p_s[2,0], 0, -p_s[0,0]], \
-                            [-p_s[1,0], p_s[0,0], 0]])
-        J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
+        # fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT
+        # u0, v0 = MyConstants.U0, MyConstants.V0
+        # u, v = x[0] - u0, x[1] - v0
+        # z = 1
+        # self.J_cam2img = np.array([[fx/z, 0, -u/z, 0, 0, 0], \
+        #                         [0, fy/z, -v/z, 0, 0, 0]])
+        # ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+        # ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        # p_s = ee_pose_mat @ self.p_s_in_panda_EE.reshape(3,1)
+        # p_s_cross = np.array([[0, -p_s[2,0], p_s[1,0]], \
+        #                     [p_s[2,0], 0, -p_s[0,0]], \
+        #                     [-p_s[1,0], p_s[0,0], 0]])
+        # J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
 
-        self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross
+        # self.Js_hat = self.J_cam2img @ np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]) @ J_p_cross
 
         # print("self.J_cam2img",self.J_cam2img)
         # print("2",np.block([[self.R_c2b,np.zeros((3,3))],[np.zeros((3,3)),self.R_c2b]]))

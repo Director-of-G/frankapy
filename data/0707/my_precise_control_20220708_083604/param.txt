@@ -1,0 +1,6 @@
+            Js_hat_for_init = np.array([[-1000,0,-1000,-1000,-1000,1000],[0,1000,1000,-1000,-1000,1000]])
+            self.Js_hat = Js_hat_for_init
+
+Js每一步的重新计算都关掉了
+
+进入vision region后： controller_adaptive.cartesian_quat_space_region.set_Ko(0)                controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))

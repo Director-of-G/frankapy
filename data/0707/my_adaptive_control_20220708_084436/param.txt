@@ -1,0 +1,9 @@
+进入vision region后： controller_adaptive.cartesian_quat_space_region.set_Ko(0)                controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))
+
+self.L = np.eye(1000) * 1000
+
+Js_hat_for_init = np.array([[-1000,0,-1000,-1000,-1000,1000],[0,1000,1000,-1000,-1000,1000]])
+self.Js_hat = Js_hat_for_init
+
+W初值
+self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
