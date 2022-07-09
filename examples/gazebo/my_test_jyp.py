@@ -166,7 +166,7 @@ def test_Image_Jacobian():
             self.state = 0
             self.last_vel = np.zeros((2,))
 
-        def in_region(self, x):
+        def in_region(self, x): # 判断是否在以图片center为中心的region内
             if (x[0] < self.bound or x[0] > MyConstantsSim.IMG_W - self.bound) or \
                (x[1] < self.bound or x[1] > MyConstantsSim.IMG_H - self.bound):
                 return False
@@ -174,7 +174,7 @@ def test_Image_Jacobian():
             else:
                 return True
 
-        def get_velocity(self, x):
+        def get_velocity(self, x): # 给region内来回跑的速度指令
             x = x.reshape(-1,)
             print('x: ', x)
             if self.state == 0:
@@ -206,7 +206,7 @@ def test_Image_Jacobian():
             else:
                 return np.zeros((2,))
 
-    def get_Js_hat(x, data_c):
+    def get_Js_hat(x, data_c): # 
         ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
         ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
         p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
@@ -228,7 +228,7 @@ def test_Image_Jacobian():
 
         return (Js @ Jrot @ Jvel).reshape(2, 6)
 
-    class velocity_calculator(object):
+    class velocity_calculator(object):# 两个步长三个点，计算实际图像空间中的速度
         def __init__(self) -> None:
             self.vels = np.zeros((3, 2)).tolist()
         
