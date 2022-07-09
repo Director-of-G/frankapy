@@ -210,7 +210,7 @@ def test_Image_Jacobian():
             else:
                 return True
 
-        def get_velocity(self, x):
+        def get_velocity(self, x): # 给region内来回跑的速度指令
             x = x.reshape(-1,)
             print('x: ', x)
             if self.state == 0:

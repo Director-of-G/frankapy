@@ -12,8 +12,8 @@ import numpy as np
 # from pyquaternion import Quaternion
 
 fa = FrankaArm()
-# joints = fa.get_joints()
-# print(joints)
+joints = fa.get_joints()
+print(joints)
 # pose = fa.get_pose()
 # print(pose)
 # print(pose.position)
@@ -42,6 +42,6 @@ fa = FrankaArm()
 # np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=1)
 # print(np.concatenate((np.array([[0],[0],[0]]),np.zeros((3,1))),axis=0))
 
-ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
-print(fa.get_pose().quaternion)
-print(ee_pose_quat)
+# ee_pose_quat = fa.get_pose().quaternion[[1,2,3,0]]
+# print(fa.get_pose().quaternion)
+# print(ee_pose_quat)
