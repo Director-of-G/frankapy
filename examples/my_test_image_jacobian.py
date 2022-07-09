@@ -27,16 +27,18 @@ from frankapy import FrankaConstants as FC
 
 from geometry_msgs.msg import PointStamped
 
+import pdb
+
+class MyConstants(object):
+    FX_HAT = 2337.218017578125
+    FY_HAT = 2341.164794921875
+    U0 = 746.3118044533257
+    V0 = 564.2590475570069
+    IMG_H = 1080
+    IMG_W = 1440
+
 def test_Image_Jacobian(fa):
     # Brief: define necessary classes
-    class MyConstantsSim(object):
-        FX_HAT = 2337.218017578125
-        FY_HAT = 2341.164794921875
-        U0 = 746.3118044533257
-        V0 = 564.2590475570069
-        IMG_H = 1080
-        IMG_W = 1440
-
     class data_collection(object):  # to get Franka data from Gazebo
         def __init__(self) -> None:
             self.vision_1_ready = False
@@ -54,11 +56,8 @@ def test_Image_Jacobian(fa):
             if not self.vision_2_ready:
                 self.vision_2_ready = True
 
-        def is_data_without_vision_1_ready(self):
-            return self.vision_2_ready
-
-        def is_data_with_vision_1_ready(self):
-            return self.vision_1_ready & self.vision_2_ready
+        def is_data_with_vision_ready(self):
+            return self.vision_1_ready
 
     class traj_generator(object):
         def __init__(self, dir:np.ndarray=None, vel:np.ndarray=None, bound=200) -> None:
@@ -76,8 +75,8 @@ def test_Image_Jacobian(fa):
             self.last_vel = np.zeros((2,))
 
         def in_region(self, x): # 判断是否在以图片center为中心的region内
-            if (x[0] < self.bound or x[0] > MyConstantsSim.IMG_W - self.bound) or \
-               (x[1] < self.bound or x[1] > MyConstantsSim.IMG_H - self.bound):
+            if (x[0] < self.bound or x[0] > MyConstants.IMG_W - self.bound) or \
+               (x[1] < self.bound or x[1] > MyConstants.IMG_H - self.bound):
                 return False
 
             else:
@@ -123,15 +122,18 @@ def test_Image_Jacobian(fa):
 
         z = 1.50 - pose.translation.reshape(-1,)[2]
 
-        R_b2c = np.array([[-1, 0,  0],
-                          [0,  1,  0],
-                          [0,  0, -1]])
-        Js = np.array([[MyConstantsSim.FX_HAT/z, 0,    -MyConstantsSim.U0/z, 0, 0, 0], \
-                       [0,    MyConstantsSim.FY_HAT/z, -MyConstantsSim.V0/z, 0, 0, 0]])
-        Js[0, 2], Js[1, 2] = -(x[0] - MyConstantsSim.U0) / 0.5, -(x[1] - MyConstantsSim.V0) / 0.5
-        cross_mat = np.array([[0,        p_s[2], -p_s[1]],
-                              [-p_s[2],  0,       p_s[0]],
-                              [p_s[1],  -p_s[0],  0]])
+        # R_b2c = np.array([[-1, 0,  0],
+        #                   [0,  1,  0],
+        #                   [0,  0, -1]])
+        R_b2c = np.array([[-0.99851048, -0.0126514,   0.05307315],
+                [-0.01185424,  0.99981255,  0.01530807],
+                [-0.05325687,  0.01465613, -0.99847329]])
+        Js = np.array([[MyConstants.FX_HAT/z, 0,    -MyConstants.U0/z, 0, 0, 0], \
+                       [0,    MyConstants.FY_HAT/z, -MyConstants.V0/z, 0, 0, 0]])
+        Js[0, 2], Js[1, 2] = -(x[0] - MyConstants.U0) / 0.5, -(x[1] - MyConstants.V0) / 0.5
+        cross_mat = np.array([[0,        p_s[2,0], -p_s[1,0]],
+                              [-p_s[2,0],  0,       p_s[0,0]],
+                              [p_s[1,0],  -p_s[0,0],  0]])
         Jrot = np.block([[R_b2c, R_b2c], [np.zeros((3, 6))]])
         Jvel = np.block([[np.eye(3), np.zeros((3, 3))], [np.zeros((3, 3)), cross_mat]])
 
@@ -149,21 +151,21 @@ def test_Image_Jacobian(fa):
             vels_array = np.array(self.vels)
             return (vels_array[2] - vels_array[0]) / (2 * (1 / 30))
 
-    nh_ = rospy.init_node('image_jacobian_testnode', anonymous=True)
+    # nh_ = rospy.init_node('image_jacobian_testnode', anonymous=True)
 
     rate = rospy.Rate(30)
     data_c = data_collection()
-    traj_g = traj_generator(dir=np.array([1, 0]), vel=0.05, bound=200)
+    traj_g = traj_generator(dir=np.array([1, 0]), vel=0.01, bound=200)
     vel_c = velocity_calculator()
     pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
-    sub_vision_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_callback, queue_size=1)
+    sub_vision_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
     
     image_space_region = ImageSpaceRegion(b=np.array([1920, 1080]))
     cartesian_space_region = CartesianSpaceRegion()
     cartesian_quat_space_region = CartesianQuatSpaceRegion()
 
     # cartesian_space_region.set_r_c(np.array([-0.0711823860573642849, 0.48430624374805804, 0.669872105919327]))
-    cartesian_space_region.set_r_c(np.array([0.10854596161538782, 0.5895254013581694, 0.3]))
+    cartesian_space_region.set_r_c(np.array([0.23854596161538782, 0.5895254013581694, 0.3]))
     cartesian_space_region.set_c(np.array([0.05, 0.05, 0.05]).reshape(1, 3))
     cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
 
@@ -173,8 +175,9 @@ def test_Image_Jacobian(fa):
     image_space_region.set_x_d(np.array([960.5, 540.5]))
     image_space_region.set_Kv(np.array([[0.2, 0.1]]))
 
-    writer = SummaryWriter(log_dir='./data/0708/' + time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time())), flush_secs=5)
-    
+    # writer = SummaryWriter(log_dir='./data/0708/' + time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time())), flush_secs=5)
+    writer = SummaryWriter(log_dir='./data/0709/my_test_image_jacobian/', flush_secs=5)
+
     # Step1: move the ArUco marker into FOV (with Cartesian region)
     max_execution_time = 25
     home_joints = fa.get_joints()
@@ -187,8 +190,9 @@ def test_Image_Jacobian(fa):
     time_start = rospy.Time.now().to_time()
 
     while not rospy.is_shutdown():
+        q = fa.get_joints()
         pose = fa.get_pose()
-        J, r_t, r_o = fa.get_jacobian(), pose.translation, pose.quaternion
+        J, r_t, r_o = fa.get_jacobian(q), pose.translation, pose.quaternion
 
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
         kesi_r = cartesian_space_region.kesi_r(r_t.reshape(1, 3))  # (1, 3)
@@ -200,7 +204,7 @@ def test_Image_Jacobian(fa):
         kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
 
         if data_c.is_data_with_vision_ready():
-            x = data_c.x
+            x = data_c.x1
             pose = fa.get_pose()
             # Js_hat.T version
             kesi_x = image_space_region.kesi_x(x).reshape(2, 1)
@@ -217,10 +221,11 @@ def test_Image_Jacobian(fa):
             print('kesi x: ', kesi_x.reshape(-1,))
             print('vision output: ', (J_pinv @ Js_hat_pinv @ kesi_x).reshape(-1,))
             """
+            print("is vision ready")
         else:
             dq_d_ = - J_pinv @ kesi_rall
 
-        if np.linalg.norm(data_c.x.reshape(-1,) - np.array([960.5, 540.5])) <= 1:
+        if np.linalg.norm(data_c.x1.reshape(-1,) - np.array([720.5, 540.5])) <= 50:
             time_now = rospy.Time.now().to_time() - time_start
             traj_gen_proto_msg = JointPositionVelocitySensorMessage(
                 id=i, timestamp=time_now, 
@@ -247,29 +252,32 @@ def test_Image_Jacobian(fa):
         )
         i += 1
         rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+        print("state = 0")
         pub.publish(ros_msg)
 
         rate.sleep()
 
     # Step2: allow the ArUco marker center to have constant velocity in image space
+    # cartesian_quat_space_region.set_Ko(0)
+    # cartesian_space_region.set_Kc(np.array([0,0,0]).reshape(1, 3))
     traj_g.state = 1
     cnt = 0
- 
+
     while not rospy.is_shutdown():
         pose = fa.get_pose()
-        J = fa.get_jacobian()
+        J = fa.get_jacobian(q)
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
-        x = data_c.x
+        x = data_c.x1
         Js_hat = get_Js_hat(x, pose=pose)
 
         x_dot = traj_g.get_velocity(x).reshape(2, 1)
         dq_d_ = J_pinv @ (Js_hat.T @ x_dot)
 
         vel = vel_c.get_vel(x)  # list
-        vel_x = {'desired': x_dot.reshape(-1,)[0],
+        vel_x = {'desired': 10000*x_dot.reshape(-1,)[0],
                  'actual': vel[0]}
-        vel_y = {'desired': x_dot.reshape(-1,)[1],
+        vel_y = {'desired': 10000*x_dot.reshape(-1,)[1],
                  'actual': vel[1]}
         writer.add_scalars('vel_x', vel_x, global_step=cnt)
         writer.add_scalars('vel_y', vel_y, global_step=cnt)
@@ -289,7 +297,9 @@ def test_Image_Jacobian(fa):
         i += 1
         rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
         pub.publish(ros_msg)
-
+        # print(image_space_region.kesi_x(x).reshape(2, 1))
+        print(Js_hat)
+        print(Js_hat @ Js_hat.T)
         rate.sleep()
 
     writer.close()
@@ -310,27 +320,69 @@ def plot_image_region_vector_field():
     # hyper-parameters
     IMG_W = 1920
     IMG_H = 1080
-    NUM_W = 96
-    NUM_H = 54
+    NUM_W = 48
+    NUM_H = 27
 
-    W_LIST = np.linspace(0, IMG_W - 1, NUM_W).tolist()
-    H_LIST = np.linspace(0, IMG_H - 1, NUM_H).tolist()
+    W_LIST = np.linspace(0, IMG_W - 1, NUM_W).reshape(-1,)
+    H_LIST = np.linspace(0, IMG_H - 1, NUM_H).reshape(-1,)
+    AXIS_W, AXIS_H = np.meshgrid(W_LIST, H_LIST)
 
+    z = 0.5  # Supposing z is fixed
+
+    R_b2c = np.array([[-1, 0,  0],
+                      [0,  1,  0],
+                      [0,  0, -1]])  # Rotational matrix from {world} to {camera}
+    
+    def compute_R_c2i(x:np.ndarray):
+        x = x.reshape(-1,)
+        u, v = x[0] - MyConstants.U0, x[1] - MyConstants.V0
+        Z = MyConstants.CAM_HEIGHT - z
+        R_c2i = np.array([[MyConstants.FX_HAT / Z, 0, - u / Z],
+                          [0, MyConstants.FY_HAT / Z, - v / Z]])
+        
+        return R_c2i
+
+    data_c = FrankaInfoStruct()
+    data_c.trans[2] = z
     image_space_region = ImageSpaceRegion(b=np.array([IMG_W, IMG_H]))
     image_space_region.set_x_d(np.array([960.5, 540.5]))
+    image_space_region.set_Kv(np.array([2, 1]))
 
-    z = 1  # Supposing z is fixed
-    vector_field = []
-    for v in H_LIST:
-        for u in W_LIST:
+    vector_field = np.zeros((NUM_H, NUM_W, 2))
+    kesi_x_field = np.zeros((NUM_H, NUM_W, 2))
+    for v_idx, v in enumerate(H_LIST):
+        for u_idx, u in enumerate(W_LIST):
             # get kesi_x
             x = np.array([u, v]).reshape(1, 2)
-            kesi_x = image_space_region.kesi_x(x)
+            data_c.x = x
+            kesi_x = image_space_region.kesi_x(x).reshape(2, 1)
+            kesi_x_field[v_idx, u_idx, :] = - kesi_x.reshape(-1,)
 
             # get Js
+            Js = get_Js_hat(data_c)
+            pdb.set_trace()
 
+            # get unit vector V_i(x)
+            """
+                dq_d = - J_pinv @ (Js.T @ kesi_x)
+                 V_b = J @ dq_d
+                 V_b = - (Js.T @ kesi_x)
+                 V_c = R_b2c @ V_b
+                 V_i = R_c2i @ V_c
+            """
+            R_c2i = compute_R_c2i(x)
+            V_b = - (Js.T @ kesi_x).reshape(-1,)[:3]
+            V_b = V_b.reshape(3, 1)
+            V_c = (R_b2c @ V_b).reshape(3, 1)
+            V_i = (R_c2i @ V_c).reshape(-1,)
+            vector_field[v_idx, u_idx, :] = 1e3 * V_i
 
-    
+    # plot figure
+    pdb.set_trace()
+    plt.quiver(AXIS_W, AXIS_H, vector_field[..., 0], vector_field[..., 1], color='blue', pivot='mid', width=0.001)
+    plt.quiver(AXIS_W, AXIS_H, kesi_x_field[..., 0], kesi_x_field[..., 1], color='red', pivot='mid', width=0.001)
+    plt.show()
+
 
 
 if __name__ == '__main__':
