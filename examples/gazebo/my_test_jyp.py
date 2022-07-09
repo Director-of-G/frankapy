@@ -1,10 +1,11 @@
+import struct
 import rospy
 import numpy as np
 from std_msgs.msg import Float64MultiArray
 from geometry_msgs.msg import PointStamped
 
 from scipy.spatial.transform import Rotation as R
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, units
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import time
 
@@ -18,6 +19,87 @@ from my_gzb_adaptive_control import CartesianSpaceRegion, CartesianQuatSpaceRegi
 from torch.utils.tensorboard import SummaryWriter
 
 import pdb
+
+class MyConstants(object):
+    FX_HAT = 3759.66467
+    FY_HAT = 3759.66467
+    U0 = 960.5
+    V0 = 540.5
+    IMG_H = 1080
+    IMG_W = 1920
+    CAM_HEIGHT = 1.50
+
+class data_collection(object):  # to get Franka data from Gazebo
+    def __init__(self) -> None:
+        self.J = np.zeros((6, 7))
+        self.q = np.zeros((7,))
+        self.trans = np.zeros((3,))
+        self.quat = np.zeros((4,))
+        self.J_ready = False
+        self.q_ready = False
+        self.pose_ready = False
+        self.vision_ready = False
+        self.x = np.array([0,0])
+
+    def zero_jacobian_callback(self, msg):
+        self.J = np.array(msg.data).reshape(6, 7)
+        if not self.J_ready:
+            self.J_ready = True
+
+    def joint_angles_callback(self, msg):
+        self.q = np.array(msg.data).reshape(7,)
+        if not self.q_ready:
+            self.q_ready = True
+
+    def pose_callback(self, msg):
+        self.trans = np.array(msg.data)[:3].reshape(3,)
+        self.quat = np.array(msg.data)[[6, 3, 4, 5]].reshape(4,)
+        if not self.pose_ready:
+            self.pose_ready = True
+
+    def vision_callback(self, msg):
+        self.x = np.array([msg.point.x,msg.point.y])
+        if not self.vision_ready:
+            self.vision_ready = True
+
+    def is_data_without_vision_ready(self):
+        return self.J_ready & self.q_ready & self.pose_ready
+
+    def is_data_with_vision_ready(self):
+        return self.J_ready & self.q_ready & self.pose_ready & self.vision_ready
+
+class FrankaInfoStruct(object):
+    def __init__(self) -> None:
+        self.x = np.array([0, 0])
+        self.quat = np.array([-0.17492908847362298, \
+                               0.6884405719242297, \
+                               0.6818253503208791, \
+                               0.17479727175084528])  # (w, x, y, z)
+        self.trans = np.array([-1, -1, 0.5])  # (deprecated, deprecated, z)
+
+def get_Js_hat(data_c):
+    x = data_c.x.reshape(-1,)
+    ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
+    ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+    p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
+    p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
+
+    Z = MyConstants.CAM_HEIGHT - data_c.trans.reshape(-1,)[2]
+
+    R_b2c = np.array([[-1, 0,  0],
+                      [0,  1,  0],
+                      [0,  0, -1]])
+    Js = np.array([[MyConstants.FX_HAT / Z, 0,    - (x[0] - MyConstants.U0) / Z, 0, 0, 0], \
+                    [0,    MyConstants.FY_HAT / Z, - (x[1] - MyConstants.V0) / Z, 0, 0, 0]])
+    cross_mat = np.array([[0,        p_s[2], -p_s[1]],
+                          [-p_s[2],  0,       p_s[0]],
+                          [p_s[1],  -p_s[0],  0]])
+    Jrot = np.block([[R_b2c, R_b2c], \
+                     [np.zeros((3, 6))]])
+    Jvel = np.block([[np.eye(3), np.zeros((3, 3))], \
+                     [np.zeros((3, 3)), cross_mat]])
+
+    return (Js @ Jrot @ Jvel).reshape(2, 6)
 
 def test_zero_Jacobian():
     class data_collection(object):
@@ -104,52 +186,6 @@ def test_plot_3D(range:np.ndarray=np.array([[-0.35 - 0.5, 0.30 - 0.5], [0.25, 0.
 
 def test_Image_Jacobian():
     # Brief: define necessary classes
-    class MyConstantsSim(object):
-        FX_HAT = 3759.66467
-        FY_HAT = 3759.66467
-        U0 = 960.5
-        V0 = 540.5
-        IMG_H = 1080
-        IMG_W = 1920
-
-    class data_collection(object):  # to get Franka data from Gazebo
-        def __init__(self) -> None:
-            self.J = np.zeros((6, 7))
-            self.q = np.zeros((7,))
-            self.trans = np.zeros((3,))
-            self.quat = np.zeros((4,))
-            self.J_ready = False
-            self.q_ready = False
-            self.pose_ready = False
-            self.vision_ready = False
-            self.x = np.array([0,0])
-
-        def zero_jacobian_callback(self, msg):
-            self.J = np.array(msg.data).reshape(6, 7)
-            if not self.J_ready:
-                self.J_ready = True
-
-        def joint_angles_callback(self, msg):
-            self.q = np.array(msg.data).reshape(7,)
-            if not self.q_ready:
-                self.q_ready = True
-
-        def pose_callback(self, msg):
-            self.trans = np.array(msg.data)[:3].reshape(3,)
-            self.quat = np.array(msg.data)[[6, 3, 4, 5]].reshape(4,)
-            if not self.pose_ready:
-                self.pose_ready = True
-
-        def vision_callback(self, msg):
-            self.x = np.array([msg.point.x,msg.point.y])
-            if not self.vision_ready:
-                self.vision_ready = True
-
-        def is_data_without_vision_ready(self):
-            return self.J_ready & self.q_ready & self.pose_ready
-
-        def is_data_with_vision_ready(self):
-            return self.J_ready & self.q_ready & self.pose_ready & self.vision_ready
 
     class traj_generator(object):
         def __init__(self, dir:np.ndarray=None, vel:np.ndarray=None, bound=200) -> None:
@@ -167,8 +203,8 @@ def test_Image_Jacobian():
             self.last_vel = np.zeros((2,))
 
         def in_region(self, x):
-            if (x[0] < self.bound or x[0] > MyConstantsSim.IMG_W - self.bound) or \
-               (x[1] < self.bound or x[1] > MyConstantsSim.IMG_H - self.bound):
+            if (x[0] < self.bound or x[0] > MyConstants.IMG_W - self.bound) or \
+               (x[1] < self.bound or x[1] > MyConstants.IMG_H - self.bound):
                 return False
 
             else:
@@ -205,28 +241,6 @@ def test_Image_Jacobian():
                 return self.vel * self.dir
             else:
                 return np.zeros((2,))
-
-    def get_Js_hat(x, data_c):
-        ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
-        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
-        p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
-        p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
-
-        z = 1.50 - data_c.trans.reshape(-1,)[2]
-
-        R_b2c = np.array([[-1, 0,  0],
-                          [0,  1,  0],
-                          [0,  0, -1]])
-        Js = np.array([[MyConstantsSim.FX_HAT/z, 0,    -MyConstantsSim.U0/z, 0, 0, 0], \
-                       [0,    MyConstantsSim.FY_HAT/z, -MyConstantsSim.V0/z, 0, 0, 0]])
-        Js[0, 2], Js[1, 2] = -(x[0] - MyConstantsSim.U0) / 0.5, -(x[1] - MyConstantsSim.V0) / 0.5
-        cross_mat = np.array([[0,        p_s[2], -p_s[1]],
-                              [-p_s[2],  0,       p_s[0]],
-                              [p_s[1],  -p_s[0],  0]])
-        Jrot = np.block([[R_b2c, R_b2c], [np.zeros((3, 6))]])
-        Jvel = np.block([[np.eye(3), np.zeros((3, 3))], [np.zeros((3, 3)), cross_mat]])
-
-        return (Js @ Jrot @ Jvel).reshape(2, 6)
 
     class velocity_calculator(object):
         def __init__(self) -> None:
@@ -287,32 +301,32 @@ def test_Image_Jacobian():
                 x = data_c.x
                 # Js_hat.T version
                 kesi_x = image_space_region.kesi_x(x).reshape(2, 1)
-                Js_hat = get_Js_hat(x, data_c).astype(np.float)  # (2, 6)
-                dq_d_ = - J_pinv @ (Js_hat.T @ kesi_x + kesi_rall.reshape(6, 1))
+                Js_hat = get_Js_hat(data_c).astype(np.float)  # (2, 6)
+                dq_d = - J_pinv @ (Js_hat.T @ kesi_x + kesi_rall.reshape(6, 1))
 
                 """
                 # Js_hat_pinv version
                 # remember to times kesi_x by 1e-6
 
                 Js_hat_pinv = Js_hat.T @ np.linalg.inv(Js_hat @ Js_hat.T)  # (6, 2)
-                dq_d_ = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall.reshape(6, 1))
+                dq_d = - J_pinv @ (Js_hat_pinv @ kesi_x + kesi_rall.reshape(6, 1))
                 print('Js_hat_pinv: ', Js_hat_pinv)
                 print('kesi x: ', kesi_x.reshape(-1,))
                 print('vision output: ', (J_pinv @ Js_hat_pinv @ kesi_x).reshape(-1,))
                 """
             else:
-                dq_d_ = - J_pinv @ kesi_rall
+                dq_d = - J_pinv @ kesi_rall
 
             if np.linalg.norm(data_c.x.reshape(-1,) - np.array([960.5, 540.5])) <= 1:
-                dq_d_ = np.zeros((7,))
+                dq_d = np.zeros((7,))
                 msg = Float64MultiArray()
-                msg.data = dq_d_.reshape(7,)
+                msg.data = dq_d.reshape(7,)
                 pub_.publish(msg)
                 
                 break
         
             msg = Float64MultiArray()
-            msg.data = dq_d_.reshape(7,)
+            msg.data = dq_d.reshape(7,)
             pub_.publish(msg)
 
             rate.sleep()
@@ -325,10 +339,10 @@ def test_Image_Jacobian():
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
         x = data_c.x
-        Js_hat = get_Js_hat(x, data_c)
+        Js_hat = get_Js_hat(data_c)
 
         x_dot = traj_g.get_velocity(x).reshape(2, 1)
-        dq_d_ = J_pinv @ (Js_hat.T @ x_dot)
+        dq_d = J_pinv @ (Js_hat.T @ x_dot)
 
         vel = vel_c.get_vel(x)  # list
         vel_x = {'desired': x_dot.reshape(-1,)[0],
@@ -340,7 +354,7 @@ def test_Image_Jacobian():
         cnt += 1
 
         msg = Float64MultiArray()
-        msg.data = dq_d_.reshape(7,)
+        msg.data = dq_d.reshape(7,)
         pub_.publish(msg)
 
         rate.sleep()
@@ -363,30 +377,72 @@ def plot_image_region_vector_field():
     # hyper-parameters
     IMG_W = 1920
     IMG_H = 1080
-    NUM_W = 96
-    NUM_H = 54
+    NUM_W = 48
+    NUM_H = 27
 
-    W_LIST = np.linspace(0, IMG_W - 1, NUM_W).tolist()
-    H_LIST = np.linspace(0, IMG_H - 1, NUM_H).tolist()
+    W_LIST = np.linspace(0, IMG_W - 1, NUM_W).reshape(-1,)
+    H_LIST = np.linspace(0, IMG_H - 1, NUM_H).reshape(-1,)
+    AXIS_W, AXIS_H = np.meshgrid(W_LIST, H_LIST)
 
+    z = 0.5  # Supposing z is fixed
+
+    R_b2c = np.array([[-1, 0,  0],
+                      [0,  1,  0],
+                      [0,  0, -1]])  # Rotational matrix from {world} to {camera}
+    
+    def compute_R_c2i(x:np.ndarray):
+        x = x.reshape(-1,)
+        u, v = x[0] - MyConstants.U0, x[1] - MyConstants.V0
+        Z = MyConstants.CAM_HEIGHT - z
+        R_c2i = np.array([[MyConstants.FX_HAT / Z, 0, - u / Z],
+                          [0, MyConstants.FY_HAT / Z, - v / Z]])
+        
+        return R_c2i
+
+    data_c = FrankaInfoStruct()
+    data_c.trans[2] = z
     image_space_region = ImageSpaceRegion(b=np.array([IMG_W, IMG_H]))
     image_space_region.set_x_d(np.array([960.5, 540.5]))
+    image_space_region.set_Kv(np.array([2, 1]))
 
-    z = 1  # Supposing z is fixed
-    vector_field = []
-    for v in H_LIST:
-        for u in W_LIST:
+    vector_field = np.zeros((NUM_H, NUM_W, 2))
+    kesi_x_field = np.zeros((NUM_H, NUM_W, 2))
+    for v_idx, v in enumerate(H_LIST):
+        for u_idx, u in enumerate(W_LIST):
             # get kesi_x
             x = np.array([u, v]).reshape(1, 2)
-            kesi_x = image_space_region.kesi_x(x)
+            data_c.x = x
+            kesi_x = image_space_region.kesi_x(x).reshape(2, 1)
+            kesi_x_field[v_idx, u_idx, :] = - kesi_x.reshape(-1,)
 
             # get Js
+            Js = get_Js_hat(data_c)
+            pdb.set_trace()
 
+            # get unit vector V_i(x)
+            """
+                dq_d = - J_pinv @ (Js.T @ kesi_x)
+                 V_b = J @ dq_d
+                 V_b = - (Js.T @ kesi_x)
+                 V_c = R_b2c @ V_b
+                 V_i = R_c2i @ V_c
+            """
+            R_c2i = compute_R_c2i(x)
+            V_b = - (Js.T @ kesi_x).reshape(-1,)[:3]
+            V_b = V_b.reshape(3, 1)
+            V_c = (R_b2c @ V_b).reshape(3, 1)
+            V_i = (R_c2i @ V_c).reshape(-1,)
+            vector_field[v_idx, u_idx, :] = 1e3 * V_i
 
-    
+    # plot figure
+    pdb.set_trace()
+    plt.quiver(AXIS_W, AXIS_H, vector_field[..., 0], vector_field[..., 1], color='blue', pivot='mid', width=0.001)
+    plt.quiver(AXIS_W, AXIS_H, kesi_x_field[..., 0], kesi_x_field[..., 1], color='red', pivot='mid', width=0.001)
+    plt.show()
 
 
 if __name__ == '__main__':
     # test_zero_Jacobian()
     # test_plot_3D()
-    test_Image_Jacobian()
+    # test_Image_Jacobian()
+    plot_image_region_vector_field()
