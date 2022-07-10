@@ -375,7 +375,7 @@ class AdaptiveRegionController(object):
             R_m2ne = np.array([[0, -p_m2ne[2], p_m2ne[1]], \
                                 [p_m2ne[2], 0, -p_m2ne[0]], \
                                 [-p_m2ne[1], p_m2ne[0], 0]])
-            J_p_cross = R_m2ne
+            J_p_cross =  - R_m2ne
             
             # rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
             # (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked

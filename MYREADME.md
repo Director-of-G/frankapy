@@ -260,6 +260,20 @@
     * `my_gzb_adaptive_control.py`中`dq_d = J_pinv @ (Js_hat.T @ x_dot)`和kesi_x无关,yp为什么说`速度和kesi_x共线`
     * 明天1.我再解决一下这个Js为什么不对，为什么仿真中是ok的？2.把矢量图画好。
 
+* **0710**
+    * 编写了`image Jacobian`的调试节点，源代码位于`./examples/gazebo/image_debug.py`
+    * 该文件运行名为`image_debugging`的ROS节点，该节点将当前ArUco Marker中心处计算出的`-kesi_x`方向(绿箭头)，marker在像素平面期望速度方向(红箭头)，和marker的实际速度方向(蓝箭头)绘制在图像中。图像左上角显示的是kesi_x与期望速度比值，用于验证二者间的变换矩阵是否接近单位阵
+    * 使用时需要将`ImageDebug`类的`pose_sub`对象用`frankapy`的接口代替
+    * 运行方式
+      * `python ./examples/gazebo/image_debug.py`
+      * `rosrun rqt_image_view rqt_image_view`查看发布在`/image_debug/result`的图像消息即可
+    * 报错
+      * Error1
+        ```
+        ImportError: dynamic module does not define module export function (PyInit_cv_bridge_boost)
+        ```
+        ROS自带的cv_bridge只能用python2环境运行，用python3执行需要自行编译cv_bridge包，考虑到项目文件包含较多python3特定语法，一种快速解决方式参考[CSDN](https://blog.csdn.net/qq_43124746/article/details/124347630)
+
 
 
 ### 常用命令

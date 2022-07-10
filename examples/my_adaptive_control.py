@@ -381,7 +381,7 @@ class AdaptiveRegionController(object):
             p_s_cross = np.array([[0, -p_s[2], p_s[1]], \
                                 [p_s[2], 0, -p_s[0]], \
                                 [-p_s[1], p_s[0], 0]])
-            J_p_cross = np.block([[np.eye(3),p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
+            J_p_cross = np.block([[np.eye(3), - p_s_cross],[np.zeros((3,3)),np.zeros((3,3))]])
             
             # rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
             # (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked

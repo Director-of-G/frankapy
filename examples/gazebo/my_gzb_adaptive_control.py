@@ -614,7 +614,7 @@ class AdaptiveRegionControllerSim(object):
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         # self.cartesian_space_region.set_r_c(np.array([-0.01624475011413961, 0.5786721263542499, 0.30532807964440667]))  # grasping pose on the right
         # self.cartesian_space_region.set_r_c(np.array([-0.0068108842682527, 0.611158320250102, 0.5342875493162069]))  # set by yxj
-        self.cartesian_space_region.set_r_c(np.array([-0.0711823860573642849, 0.43430624374805804, 0.569872105919327]))  # set by jyp | grasping pose above the second object with marker
+        self.cartesian_space_region.set_r_c(np.array([-0.0011823860573642849, 0.43430624374805804, 0.569872105919327]))  # set by jyp | grasping pose above the second object with marker
         self.cartesian_space_region.set_c(np.array([0.05, 0.05, 0.05]).reshape(1, 3))
         self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
 

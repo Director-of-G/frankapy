@@ -1,3 +1,14 @@
+"""
+    Some useful debugging methods.
+    1. test code for zero Jacobian.
+       (command Franka with Cartesian velocity,
+        and see how it is executed)
+    2. test code for image Jacobian.
+       (command Franka with Image plane velocity,
+        and see how it is executed)
+    3. test code for plotting vector field.
+"""
+
 import struct
 import rospy
 import numpy as np
@@ -82,7 +93,7 @@ def get_Js_hat(data_c):
     ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
     ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
     p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
-    p_s = ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)
+    p_s = (ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)).reshape(-1,)
 
     Z = MyConstants.CAM_HEIGHT - data_c.trans.reshape(-1,)[2]
 
@@ -361,6 +372,15 @@ def test_Image_Jacobian():
 
     writer.close()
 
+def compute_R_c2i(x:np.ndarray, z):
+    x = x.reshape(-1,)
+    u, v = x[0] - MyConstants.U0, x[1] - MyConstants.V0
+    Z = MyConstants.CAM_HEIGHT - z
+    R_c2i = np.array([[MyConstants.FX_HAT / Z, 0, - u / Z],
+                        [0, MyConstants.FY_HAT / Z, - v / Z]])
+    
+    return R_c2i
+
 def plot_image_region_vector_field():
     """
         1. Plot vector field in the image plane.
@@ -389,15 +409,6 @@ def plot_image_region_vector_field():
     R_b2c = np.array([[-1, 0,  0],
                       [0,  1,  0],
                       [0,  0, -1]])  # Rotational matrix from {world} to {camera}
-    
-    def compute_R_c2i(x:np.ndarray):
-        x = x.reshape(-1,)
-        u, v = x[0] - MyConstants.U0, x[1] - MyConstants.V0
-        Z = MyConstants.CAM_HEIGHT - z
-        R_c2i = np.array([[MyConstants.FX_HAT / Z, 0, - u / Z],
-                          [0, MyConstants.FY_HAT / Z, - v / Z]])
-        
-        return R_c2i
 
     data_c = FrankaInfoStruct()
     data_c.trans[2] = z
@@ -417,7 +428,7 @@ def plot_image_region_vector_field():
 
             # get Js
             Js = get_Js_hat(data_c)
-            pdb.set_trace()
+            # pdb.set_trace()
 
             # get unit vector V_i(x)
             """
@@ -427,7 +438,7 @@ def plot_image_region_vector_field():
                  V_c = R_b2c @ V_b
                  V_i = R_c2i @ V_c
             """
-            R_c2i = compute_R_c2i(x)
+            R_c2i = compute_R_c2i(x, z=z)
             V_b = - (Js.T @ kesi_x).reshape(-1,)[:3]
             V_b = V_b.reshape(3, 1)
             V_c = (R_b2c @ V_b).reshape(3, 1)
