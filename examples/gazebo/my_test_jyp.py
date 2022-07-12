@@ -269,7 +269,7 @@ def test_Image_Jacobian():
 
     rate = rospy.Rate(30)
     data_c = data_collection()
-    traj_g = traj_generator(dir=np.array([1, 0]), vel=0.05, bound=200)
+    traj_g = traj_generator(dir=np.array([1, 0]), vel=0.005, bound=200)
     vel_c = velocity_calculator()
     pub_ = rospy.Publisher('/gazebo_sim/joint_velocity_desired', Float64MultiArray, queue_size=10)
     sub_J_ = rospy.Subscriber('/gazebo_sim/zero_jacobian', Float64MultiArray, data_c.zero_jacobian_callback, queue_size=1)
@@ -455,5 +455,5 @@ def plot_image_region_vector_field():
 if __name__ == '__main__':
     # test_zero_Jacobian()
     # test_plot_3D()
-    # test_Image_Jacobian()
-    plot_image_region_vector_field()
+    test_Image_Jacobian()
+    # plot_image_region_vector_field()

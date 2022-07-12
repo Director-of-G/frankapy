@@ -43,7 +43,7 @@ class ImageDebug(object):
         self.pixel1_sub = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, callback=self.pixel1_callback, queue_size=1)
         self.pose_sub = rospy.Subscriber('/gazebo_sim/ee_pose', Float64MultiArray, self.pose_callback, queue_size=1)
         self.pixel2_sub = rospy.Subscriber('/aruco_simple/pixel2', PointStamped, callback=self.pixel2_callback, queue_size=1)
-        self.img_pub = rospy.Publisher('/image_debug/result', Image)
+        self.img_pub = rospy.Publisher('/image_debug/result', Image, queue_size=1)
         self.pixel1 = None
         self.pixel1_queue = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
         self.vel = np.array([0.0, 0.0])
