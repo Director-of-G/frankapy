@@ -274,6 +274,10 @@
         ```
         ROS自带的cv_bridge只能用python2环境运行，用python3执行需要自行编译cv_bridge包，考虑到项目文件包含较多python3特定语法，一种快速解决方式参考[CSDN](https://blog.csdn.net/qq_43124746/article/details/124347630)
 
+* **0712**
+    * 完成`my_adaptive_control_0712.py`。加入了Js的debug功能。发现效果很好。
+    * 限制某些关节进入一些joint region还有问题。
+
 
 
 ### 常用命令

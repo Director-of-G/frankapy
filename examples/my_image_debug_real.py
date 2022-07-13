@@ -17,15 +17,28 @@ from cv_bridge import CvBridge
 import numpy as np
 
 from my_adaptive_control import ImageSpaceRegion
-from gazebo.my_test_jyp import get_Js_hat, compute_R_c2i
+# from gazebo.my_test_jyp import get_Js_hat, compute_R_c2i
 
 import pdb
 
 from frankapy import FrankaArm,SensorDataMessageType
 from frankapy import FrankaConstants as FC
 
+from scipy.spatial.transform import Rotation as R
+
 IMG_W = 1440
 IMG_H = 1080
+
+class MyConstants(object):
+    """
+        @ Class: MyConstants
+        @ Function: get all the constants in this file
+    """
+    FX_HAT = 2337.218017578125
+    FY_HAT = 2341.164794921875
+    U0 = 746.3118044533257
+    V0 = 564.2590475570069
+    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.1342875493162069])
 
 class FrankaInfoStruct(object):
     def __init__(self) -> None:
@@ -41,7 +54,7 @@ desired_position_bias = -np.array([200, 100])
 
 class ImageDebug(object):
     def __init__(self, fa):
-        self.nh_ = rospy.init_node('image_debugging', anonymous=True)
+        # self.nh_ = rospy.init_node('image_debugging', anonymous=True)
         self.img_sub = rospy.Subscriber('/aruco_simple/result', Image, callback=self.image_callback, queue_size=1)
         self.pixel1_sub = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, callback=self.pixel1_callback, queue_size=1)
         # self.pose_sub = rospy.Subscriber('/gazebo_sim/ee_pose', Float64MultiArray, self.pose_callback, queue_size=1)
@@ -54,6 +67,32 @@ class ImageDebug(object):
         self.data_c = FrankaInfoStruct()
         self.pose_ready = False
         self.fa = fa
+    
+    def get_Js(self,data_c,pose): # COPIED from image_debug.py, to get real Js! yxj 0712
+        x = data_c.x.reshape(-1,)
+        ee_pose_quat = pose.quaternion[[1,2,3,0]]
+        ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
+        # p_s_in_panda_EE = np.array([0.058690, 0.067458, -0.053400])
+        p_s_in_panda_EE = np.array([0.067, 0.08, -0.05])
+        p_s = (ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)).reshape(-1,)
+
+        # Z = MyConstants.CAM_HEIGHT - pose.trans.reshape(-1,)[2]
+        Z = 1
+
+        R_b2c = np.array([[-1, 0,  0],
+                        [0,  1,  0],
+                        [0,  0, -1]])
+        Js = np.array([[MyConstants.FX_HAT / Z, 0,    - (x[0] - MyConstants.U0) / Z, 0, 0, 0], \
+                        [0,    MyConstants.FY_HAT / Z, - (x[1] - MyConstants.V0) / Z, 0, 0, 0]])
+        cross_mat = np.array([[0,        p_s[2,0], -p_s[1,0]],
+                            [-p_s[2,0],  0,       p_s[0,0]],
+                            [p_s[1,0],  -p_s[0,0],  0]])
+        Jrot = np.block([[R_b2c, R_b2c], \
+                        [np.zeros((3, 6))]])
+        Jvel = np.block([[np.eye(3), np.zeros((3, 3))], \
+                        [np.zeros((3, 3)), cross_mat]])
+
+        return (Js @ Jrot @ Jvel).reshape(2, 6)
 
     def image_callback(self, data):
         bridge = CvBridge()
@@ -79,8 +118,15 @@ class ImageDebug(object):
             self.data_c.trans = self.fa.get_pose().translation
             self.data_c.quat = self.fa.get_pose().quaternion
             
-            Js = get_Js_hat(self.data_c)
-            R_c2i = compute_R_c2i(self.pixel1, self.data_c.trans[2])
+            Js = self.get_Js(self.data_c)
+
+            x = self.pixel1
+            u, v = x[0] - MyConstants.U0, x[1] - MyConstants.V0
+            # Z = MyConstants.CAM_HEIGHT - z
+            Z = 1
+            R_c2i = np.array([[MyConstants.FX_HAT / Z, 0, - u / Z],
+                                [0, MyConstants.FY_HAT / Z, - v / Z]])
+
             V_b = - (Js.T @ kesi_x).reshape(-1,)[:3]
             V_b = V_b.reshape(3, 1)
             V_c = (R_b2c @ V_b).reshape(3, 1)
@@ -123,5 +169,6 @@ class ImageDebug(object):
 
 
 if __name__ == '__main__':
-    debugger = ImageDebug()
+    fa = FrankaArm()
+    debugger = ImageDebug(fa=fa)
     debugger.main()
