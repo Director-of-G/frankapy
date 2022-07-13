@@ -1,1 +1,4 @@
 ko = 15 -> ko = 10(enter the vision region)
+
+
+注意Js真值也是在不断更新的（因为末端姿态和x都不一样了）

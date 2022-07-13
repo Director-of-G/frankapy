@@ -276,6 +276,7 @@
 
 * **0712**
     * 完成`my_adaptive_control_0712.py`。加入了Js的debug功能。发现效果很好。
+        跑之前记得`source ~/python3_ws/devel/setup.bash --extend`
     * 限制某些关节进入一些joint region还有问题。
 
 
