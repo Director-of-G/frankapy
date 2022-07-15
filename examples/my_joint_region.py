@@ -334,137 +334,6 @@ class JointSpaceRegion(object):
 
         return kesi_q.reshape(1, -1)
 
-
-class AdaptiveImageJacobian(object):
-    """
-        @ Class: AdaptiveImageJacobian
-        @ Function: adaptive update the image jacobian
-    """
-    # def __init__(self, fa: FrankaArm =None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
-    def __init__(self, fa=None, n_k_per_dim=10, Js=None, x=None, L=None, W_hat=None, theta_cfg:dict=None) -> None:
-        # n_k_per_dim => the number of rbfs in each dimension
-        if fa is None:
-            raise ValueError('FrankaArm handle is not provided!')
-        self.fa = fa
-
-        # dimensions declaration
-        self.m = 6  # the dimension of Cartesian space configuration r
-        self.n_k = n_k_per_dim ** 3  # the dimension of rbf function θ(r)
-        # Js has three variables (x, y, z), 
-        # and (θi, θj, θk) do not actually affect Js, 
-        # when r is represented as body twist
-
-        # Js here transforms Cartesian space BODY TWIST (v_b, w_b): 6 * 1 
-        # to image space velocity (du, dv): 2 * 1
-        # Js is 2 * 6, while Js[3:, :] = [0] because w_b do not actually affect (du, dv)
-        if Js is not None:
-            if Js.shape != (2, 6):
-                raise ValueError('Dimension of Js should be (2, 6), not ' + str(Js.shape) + '!')
-            self.Js_hat = Js
-        else:  # control with precise Js
-            if x is None:
-                raise ValueError('Target point x on the image plane should not be empty!')
-            fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT
-            u0, v0 = MyConstants.U0, MyConstants.V0
-            u, v = x[0] - u0, x[1] - v0
-            z = 1
-            J_cam2img = np.array([[fx/z, 0, -u/z, -u*v/fx, (fx+u**2)/fx, -v], \
-                                  [0, fy/z, -v/z, -(fy+v**2)/fy, u*v/fy, u]])
-            J_base2cam = MyJacobianHandler.calcJacobian(from_frame='panda_link0', to_frame='camera_link')
-            
-            rot_ee = fa.get_pose().rotation  # (rotation matrix of the end effector)
-            (r, p, y) = R.from_matrix(rot_ee).as_euler('XYZ', degrees=False)  # @TODO: intrinsic rotation, first 'X', second 'Y', third'Z', to be checked
-            J_baserpy2w = np.block([[np.eye(3), np.zeros((3, 3))], \
-                                    [np.zeros((3, 3)), np.array([[1, 0, math.sin(p)], \
-                                                                 [0, math.cos(r), -math.cos(p) * math.sin(r)], \
-                                                                 [0, math.sin(r), math.cos(p) * math.cos(r)]])]])
-            self.Js_hat = J_cam2img @ J_base2cam  # Js_hat = J_base2img
-
-        if L is not None:
-            if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
-                raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
-            self.L = L
-        else:
-            raise ValueError('Matrix L should not be empty!')
-
-        if W_hat is not None:
-            if W_hat.shape != (2 * self.m, self.n_k):  # (12, 1000)
-                raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
-            self.W_hat = W_hat
-        else:
-            raise ValueError('Matrix W_hat should not be empty!')
-
-        self.theta = RadialBF()
-        self.theta.init_rbf_()
-
-        self.image_space_region = ImageSpaceRegion()
-        self.cartesian_space_region = CartesianSpaceRegion()
-        self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
-        self.joint_space_region = JointSpaceRegion()
-
-    def kesi_x(self, x):
-        return self.image_space_region.kesi_x(x.reshape(1, -1))
-
-    def kesi_r(self, r):
-        return self.cartesian_space_region.kesi_r(r.reshape(1, -1))
-
-    def kesi_rq(self, rq):
-        return self.cartesian_quat_space_region.kesi_rq(Quat(rq.reshape(-1,)))
-
-    def kesi_q(self, q):
-        return self.joint_space_region.kesi_q(q.reshape(1, 7))
-
-    def get_theta(self, r):
-        return self.theta.get_rbf_(r)
-
-    def get_Js_hat(self):
-        return self.Js_hat
-
-    def update(self):
-        r = self.fa.get_pose()  # get r: including translation and rotation matrix
-        q = self.fa.get_joints()  # get q: joint angles
-
-        # split Cartesian translation and quaternion
-        r_tran = r.translation
-        r_quat = r.quaternion  # w, x, y, z
-
-        theta = self.get_theta(r_tran)  # get the neuron values theta(r) (1000*1)
-        J = self.fa.get_jacobian(q)  # get the analytic jacobian (6*7)
-        J_pinv = J.T @ np.linalg.inv(J @ J.T)  # get the pseudo inverse of J (7*6)
-        J_rot = Quat(r_quat).jacobian_rel2_axis_angle_()  # get the jacobian (partial p / partial r_o^T) (4, 3)
-        
-        kesi_x = self.kesi_x().reshape(-1, 1)  # (2, 1)
-        kesi_rt = self.kesi_r().reshape(-1, 1)  # (3, 1)
-        kesi_rq = self.kesi_rq() @ J_rot  # (1, 4) @ (4, 3) = (1, 3)
-        kesi_r = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
-        kesi_q = self.kesi_q().reshape(-1, 1)  # (7, 1)
-
-        kesi_x_pie = np.c_[kesi_x[0] * np.eye(6), kesi_x[1] * np.eye(6)]  # (6, 12)
-
-        dW_hat = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T  # (1000, 6)
-        dW_hat = dW_hat @ kesi_x_pie  # (1000, 12)
-
-        self.W_hat = self.W_hat + dW_hat.T
-
-        # update J_s
-        temp_Js_hat = self.W_hat @ theta  # (12, 1)
-        self.Js_hat = np.c_[temp_Js_hat[:6], temp_Js_hat[6:]].T  # (2, 6)
-
-        # deprecated
-        '''
-        dW_hat1_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T * kesi_x[0]
-        dW_hat2_T = - self.L @ theta @ (self.Js_hat.T @ kesi_x + kesi_r + J_pinv.T @ kesi_q).T * kesi_x[1]
-
-        dW_hat1, dW_hat2 = dW_hat1_T.T, dW_hat2_T.T  # (6, n_k), (6, n_k)
-        dW_hat = np.concatenate((dW_hat1, dW_hat2), axis=0)  # (12, n_k)
-        self.W_hat = self.W_hat + dW_hat  # (12, n_k)
-
-        Js_hat1 = self.W_hat[:6, :] @ theta  # (6, 1)
-        Js_hat2 = self.W_hat[6:, :] @ theta  # (6, 1)
-        Js_hat = np.concatenate((Js_hat1.reshape(1, -1), Js_hat2.reshape(1, -1)), axis=0)  # (2, 6)
-        self.Js_hat = Js_hat
-        '''
-
 class JointOutputRegionControl(object):
     def __init__(self, sim_or_real='sim', fa=None) -> None:
         self.joint_space_region = JointSpaceRegion()
@@ -491,17 +360,18 @@ class JointOutputRegionControl(object):
         #                                          kq=100000, kr=1000, \
         #                                          inner=True, scale=np.ones((7, 1)))
 
-        self.joint_space_region.add_region_multi(qc=np.array([1.19876445, 0.16743403, 0.46827566, -2.40414747, 0.47512512, 3.3847505, 0.42326836]), \
+        self.joint_space_region.add_region_multi(qc=np.array([1.35924685,0.01409621,-0.03143654,-2.21992752,  0.24573268,  2.48413623,0.50480508]), \
                                                  qbound=0.12, qrbound=0.10, \
                                                  mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
                                                  kq=1, kr=0.01, \
                                                  inner=False, scale=np.ones((7, 1)))
         self.singularity_joint = np.array([1.19582476e+00, -1.79016522e-03, 3.56311106e-01, -2.51608346e+00, 4.75119009e-01, 3.31746127e+00, 5.93365287e-01])
-        self.joint_space_region.add_region_multi(qc=self.singularity_joint, \
-                                                 qbound=0.50, qrbound=0.45, \
-                                                 mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-                                                 kq=1000000, kr=10000, \
-                                                 inner=True, scale=np.ones((7, 1)))# this is joint sigularity position: inner = True
+        # self.joint_space_region.add_region_multi(qc=self.singularity_joint, \
+        #                                          qbound=0.50, qrbound=0.45, \
+        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
+        #                                          kq=1000000, kr=10000, \
+        #                                          inner=True, scale=np.ones((7, 1)))# this is joint sigularity position: inner = True
+        self.joint_space_region.add_region_single(qc = -2.6,qbound=0.2,qrbound=0.3,mask=np.array([0,0,0,1,0,0,0]),kq=1,kr=0.1,inner=True,scale=np.ones((7,1)))
     def calc_manipubility(self, J_b):
         det = np.linalg.det(J_b @ J_b.T)
         return math.sqrt(np.abs(det))
@@ -534,6 +404,8 @@ def test_joint_space_region_control(fa):
     dq_d_list = []
     kesi_q_list = []
     dist_list = []
+    t_list = []
+    p_list = []
     q_and_manipubility_list = np.zeros((0, 8))
 
     max_execution_time = 10.0
@@ -563,6 +435,8 @@ def test_joint_space_region_control(fa):
         # print(dq_d_)
         dq_d_list.append(dq_d_.reshape(7,).tolist())
         kesi_q_list.append(kesi_q.reshape(7,).tolist())
+        t_list.append(time_start_this_loop)
+        p_list.append(controller.joint_space_region.Ps(q_and_m[0, :7]))
         # msg =JointVelocityCommand()
         # msg.dq_d = dq_d_.reshape(7,)
         # pub.publish(msg)
@@ -595,37 +469,50 @@ def test_joint_space_region_control(fa):
 
         rate_.sleep()
 
-    pre_traj = "./data/0609/two_regions/"
+    pre_traj = "./data/0715/my_joint_region/"
     np.save(pre_traj+'q_and_m.npy', q_and_manipubility_list)
     plt.figure()
     ax = plt.subplot(2, 2, 1)
-    plt.plot(dq_d_list)
+    plt.plot(t_list,dq_d_list)
     plt.legend(['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7'])
     ax.set_title("dq_d")
     ax = plt.subplot(2, 2, 2)
-    plt.plot(kesi_q_list)
+    plt.plot(t_list,kesi_q_list)
     ax.set_title("kesi_q")
     plt.legend(['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7'])
     ax = plt.subplot(2, 2, 3)
-    plt.plot(dist_list)
+    plt.plot(t_list,dist_list)
     ax.set_title("distance")
     ax = plt.subplot(2, 2, 4)
-    plt.plot(q_and_manipubility_list[:, 7])
+    plt.plot(t_list,q_and_manipubility_list[:, 7])
     ax.set_title("manipubility")
     plt.savefig(pre_traj+'figure.jpg')
+
+    plt.figure()
+    plt.plot(t_list,p_list)
+    plt.title('P')
+    plt.savefig(pre_traj+'P.jpg')
+
+    plt.figure()
+    plt.plot(t_list,q_and_manipubility_list[:,0:7])
+    plt.legend(['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7'])
+    plt.title('q')
+    plt.savefig(pre_traj+'q.jpg')
+    
     plt.show()
     info = {'dq_d': dq_d_list, \
             'kesi_q': kesi_q_list, \
             'dist': dist_list, \
-            'q_and_manip': q_and_manipubility_list}
-    with open(pre_traj+'q_and_manip.pkl', 'wb') as f:
+            'q_and_manip': q_and_manipubility_list, \
+            't_list': t_list}
+    with open(pre_traj+'data.pkl', 'wb') as f:
         pickle.dump(info, f)
 
 def plot_figures():
     import pickle
-    with open('./data/0521/q_and_manip.pkl', 'rb') as f:
+    with open('./data/0521/data.pkl', 'rb') as f:
         data1 = pickle.load(f)
-    with open('./data/0521/q_and_manip.pkl', 'rb') as f:
+    with open('./data/0521/data.pkl', 'rb') as f:
         data2 = pickle.load(f)
     plt.figure()
     plt.subplot(1, 2, 1)
@@ -643,7 +530,30 @@ def plot_figures():
 
 
 if __name__ == '__main__':
-    # jsr = JointSpaceRegion()
+    jsr = JointSpaceRegion()
+    # jsr.add_region_single(qc = -2.6,qbound=0.2,qrbound=0.3,mask=np.array([0,0,0,1,0,0,0]),kq=1,kr=0.1,inner=True,scale=1)
+    jsr.add_region_multi(np.array([0.5, 0.5, 0.5, -2.6, 0.5, 0.5, 0.5]), 0.2, 0.3, np.array([0,0,0,1,0,0,0]), kq=5000, kr=500, inner=True)
+    aaa = np.arange(-3,-2.3,0.02)
+    index = []
+    kesi_list = []
+    P_list = []
+    for i, joint in enumerate(aaa):
+        index.append(aaa[i])
+        q = np.array([0,0,0,joint,0,0,0])
+        kesi_list.append(jsr.kesi_q(q)[0,3])
+        P_list.append(jsr.Ps(q))
+    print(index)
+    print(kesi_list)
+    print(P_list)
+
+    from matplotlib import pyplot as plt
+    plt.figure()
+    plt.plot(aaa, P_list)
+
+    plt.figure()
+    plt.plot(aaa, kesi_list)
+
+    plt.show()
     # jsr.add_region_multi(np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), 0.08, 0.1, np.array([1, 1, 1, 1, 1, 1, 1]), kq=5000, kr=10, inner=True)
     
     # q_test = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
@@ -674,8 +584,7 @@ if __name__ == '__main__':
     # plt.ylim(0, 0.005)
     # plt.show()
 
-    fa = FrankaArm()
-    test_joint_space_region_control(fa=fa)
-    # test_cartesian_joint_space_region_control()
+    # fa = FrankaArm()
+    # test_joint_space_region_control(fa=fa)
     # plot_figures()
     

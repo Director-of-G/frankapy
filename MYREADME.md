@@ -279,7 +279,8 @@
         跑之前记得`source ~/python3_ws/devel/setup.bash --extend`
     * 限制某些关节进入一些joint region还有问题。
 
-
+* **0714**
+    * 加上joint region。注意`add_region_single`是为了1自由度机械臂写的，目前已经没用了。对某一个关节加region还是要用`add_region_multi`,只不过其中的mask设置一下就可以了。
 
 ### 常用命令
 1. 启动仿真环境
