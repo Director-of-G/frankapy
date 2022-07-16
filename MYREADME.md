@@ -282,6 +282,13 @@
 * **0714**
     * 加上joint region。注意`add_region_single`是为了1自由度机械臂写的，目前已经没用了。对某一个关节加region还是要用`add_region_multi`,只不过其中的mask设置一下就可以了。
 
+* **0716**
+    * 完成了加入单个joint排斥region的实验,代码是`my_joint_region.py`,数据在`0716/my_joint_region/`中.虽然从关节角度上joint 4的效果不明显,但是`kesi_q`和`dq_d`的差别还是很大的.(原先写的`kesi_q`函数有点问题,多个region的时候计算会出错,问题出在sum的位置不对.现在已经debug好了.)
+    * 修改`my_adaptive_control_0712.py`代码,
+        * 将其中joint region中的`add_region_single`全部去掉了,
+        * 'kesi_q'已经改成正确的了.(虽然本实验中只有一个region不会出问题)
+    
+
 ### 常用命令
 1. 启动仿真环境
    * 启动Gazebo

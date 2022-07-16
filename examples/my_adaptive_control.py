@@ -292,26 +292,37 @@ class JointSpaceRegion(object):
     def kesi_q(self, q):
         fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
 
-        partial_f_q = np.zeros((1, 7))
-        q = q.reshape(1, 7)
-        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-        for i, idx in enumerate(self.single_mask[0]):
-            if fq_single[0, i] < 0:
-                partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
+        # partial_f_q = np.zeros((1, 7))
+        # q = q.reshape(1, 7)
+        # q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
+        # for i, idx in enumerate(self.single_mask[0]):
+        #     if fq_single[0, i] < 0:
+        #         partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
 
         q = q.reshape(7, 1)
         q_scale_multi = q * self.multi_scale  # (7, n_multi)
         not_in_region_mask = (fq_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
-        partial_f_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask, axis=1).reshape(1, 7)
+        partial_f_q = (2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask) # (7, n_multi)
+
+        not_in_r_region_mask = (fqr_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
+        partial_fr_q = (2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_r_region_mask) # (7, n_multi)
+
+        # print('partial_f_q\n',partial_f_q)
+        # print('partial_fr_q\n',partial_fr_q)
 
         kesi_q = np.zeros((1, 7))
-        kesi_q = kesi_q + np.sum(self.single_kq * np.minimum(0, fq_single))
-        kesi_q = kesi_q + np.sum(self.single_kr * np.minimum(0, fqr_single))
-        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi))
-        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi))
-        kesi_q = kesi_q * partial_f_q
+        # print('kesi_q_0',kesi_q)
+        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi) * partial_f_q ,axis=1)
+        # print('kesi_q_1',kesi_q)
+        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi) * partial_fr_q,axis=1)
+        # print('kesi_q',kesi_q)
+        # print('----------------------------')
 
         return kesi_q.reshape(1, -1)
+
+    def set_kq_kr(self, kq,kr):
+        self.multi_kq = kq
+        self.multi_kr = kr
 
 
 class AdaptiveRegionController(object):
@@ -431,6 +442,7 @@ class AdaptiveRegionController(object):
 
 
         self.joint_space_region = JointSpaceRegion()
+        # self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.0, 0, 0, 0]), 0.2, 0.4, np.array([0,0,0,1,0,0,0]), kq=10, kr=5, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
 
     def kesi_x(self, x):
         return self.image_space_region.kesi_x(x.reshape(1, -1))
@@ -540,7 +552,7 @@ class AdaptiveRegionController(object):
 
 # 0702 yxj
 def test_adaptive_region_control(fa, allow_update=False):
-    pre_traj = "./data/0707/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"/"
+    pre_traj = "./data/0716/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_without_joint_region/"
     os.mkdir(pre_traj)
     class vision_collection(object):
         def __init__(self) -> None:
@@ -627,8 +639,9 @@ def test_adaptive_region_control(fa, allow_update=False):
         """
         if data_c.is_data_with_vision_1_ready():
             if change_the_space_region_param is False:
-                controller_adaptive.cartesian_quat_space_region.set_Ko(0)
-                controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))
+                # controller_adaptive.cartesian_quat_space_region.set_Ko(0)
+                # controller_adaptive.cartesian_space_region.set_Kc(np.array([0,0,0]))
+                # controller_adaptive.joint_space_region.set_kq_kr(kq=[[0]],kr = [[0]])
                 change_the_space_region_param = True
             dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=True)
             if allow_update:
@@ -748,6 +761,11 @@ def test_adaptive_region_control(fa, allow_update=False):
         plt.plot(time_list,np.array(Js_list)[:,i],label = 'kesi')
     plt.suptitle('Js')
     plt.savefig(pre_traj+'Js.jpg')
+
+    plt.figure()
+    plt.plot(time_list,q_and_manipubility_list[:,0:7],label = 'kesi')
+    plt.title('q')
+    plt.savefig(pre_traj+'q.jpg')
 
     plt.show()
     info = {'f_list': f_list, \

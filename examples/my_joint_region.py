@@ -272,6 +272,16 @@ class JointSpaceRegion(object):
         self.multi_qbound = np.concatenate((self.multi_qbound, [[qbound]]), axis=1)
         self.multi_qrbound = np.concatenate((self.multi_qrbound, [[qrbound]]), axis=1)
         self.multi_inout = np.concatenate((self.multi_inout, [[int(inner) * 2 - 1]]), axis=1)
+        print('self.multi_kq',self.multi_kq)
+        print('self.multi_kr',self.multi_kr)
+        print('self.multi_qc',self.multi_qc)
+        print('self.multi_scale',self.multi_scale)
+        print('self.multi_mask',self.multi_mask)
+        print('self.multi_qbound',self.multi_qbound)
+        print('self.multi_qrbound',self.multi_qrbound)
+        print('self.multi_inout',self.multi_inout)
+        print('======================================')
+
 
     def fq(self, q):
         n_single, n_multi = self.single_qc.shape[1], self.multi_qc.shape[1]  # (1, n_single) and (7, n_multi)
@@ -290,7 +300,8 @@ class JointSpaceRegion(object):
         fq_multi = fq_multi * self.multi_inout  # (1, n_multi)
         fqr_multi = fqr_multi * self.multi_inout  # (1, n_multi)
 
-        print(fq_single, fqr_single, fq_multi, fqr_multi)
+        # print('fq_single | fqr_single | fq_multi | fqr_multi')
+        # print(fq_single, fqr_single, fq_multi, fqr_multi)
 
         return fq_single.reshape(1, n_single), fqr_single.reshape(1, n_single), \
                 fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
@@ -310,27 +321,73 @@ class JointSpaceRegion(object):
 
         return Ps
 
+    # def kesi_q(self, q):
+    #     fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
+
+    #     partial_f_q = np.zeros((1, 7))
+    #     q = q.reshape(1, 7)
+    #     q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
+    #     for i, idx in enumerate(self.single_mask[0]):
+    #         if fq_single[0, i] < 0:
+    #             partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
+
+    #     q = q.reshape(7, 1)
+    #     q_scale_multi = q * self.multi_scale  # (7, n_multi)
+    #     not_in_region_mask = (fq_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
+    #     partial_f_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask, axis=1).reshape(1, 7)
+
+    #     partial_fr_q = np.zeros((1,7))
+    #     not_in_r_region_mask = (fqr_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
+    #     partial_fr_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_r_region_mask, axis=1).reshape(1, 7)
+
+    #     print('partial_f_q',partial_f_q)
+    #     print('partial_fr_q',partial_fr_q)
+
+    #     kesi_q = np.zeros((1, 7))
+    #     kesi_q = kesi_q + np.sum(self.single_kq * np.minimum(0, fq_single))
+    #     kesi_q = kesi_q + np.sum(self.single_kr * np.minimum(0, fqr_single))
+    #     print('kesi_q_0',kesi_q)
+    #     kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi)) * partial_f_q
+    #     print('kesi_q_1',kesi_q)
+    #     kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi)) * partial_fr_q
+    #     print('kesi_q',kesi_q)
+    #     print('----------------------------')
+    #     print('np.sum(self.multi_kr * np.minimum(0, fqr_multi)) * partial_fr_q',np.sum(self.multi_kr * np.minimum(0, fqr_multi)) * partial_fr_q)
+    #     print('self.multi_kr * np.minimum(0, fqr_multi)',self.multi_kr * np.minimum(0, fqr_multi))
+    #     print('np.sum(self.multi_kr * np.minimum(0, fqr_multi))',np.sum(self.multi_kr * np.minimum(0, fqr_multi)))
+    #     print('partial_fr_q',partial_fr_q)
+
+    #     # kesi_q = kesi_q * partial_f_q
+
+    #     return kesi_q.reshape(1, -1)
     def kesi_q(self, q):
         fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
 
-        partial_f_q = np.zeros((1, 7))
-        q = q.reshape(1, 7)
-        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-        for i, idx in enumerate(self.single_mask[0]):
-            if fq_single[0, i] < 0:
-                partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
+        # partial_f_q = np.zeros((1, 7))
+        # q = q.reshape(1, 7)
+        # q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
+        # for i, idx in enumerate(self.single_mask[0]):
+        #     if fq_single[0, i] < 0:
+        #         partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
 
         q = q.reshape(7, 1)
         q_scale_multi = q * self.multi_scale  # (7, n_multi)
         not_in_region_mask = (fq_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
-        partial_f_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask, axis=1).reshape(1, 7)
+        partial_f_q = (2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask) # (7, n_multi)
+
+        not_in_r_region_mask = (fqr_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
+        partial_fr_q = (2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_r_region_mask) # (7, n_multi)
+
+        # print('partial_f_q\n',partial_f_q)
+        # print('partial_fr_q\n',partial_fr_q)
 
         kesi_q = np.zeros((1, 7))
-        kesi_q = kesi_q + np.sum(self.single_kq * np.minimum(0, fq_single))
-        kesi_q = kesi_q + np.sum(self.single_kr * np.minimum(0, fqr_single))
-        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi))
-        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi))
-        kesi_q = kesi_q * partial_f_q
+        # print('kesi_q_0',kesi_q)
+        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi) * partial_f_q ,axis=1)
+        # print('kesi_q_1',kesi_q)
+        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi) * partial_fr_q,axis=1)
+        # print('kesi_q',kesi_q)
+        # print('----------------------------')
 
         return kesi_q.reshape(1, -1)
 
@@ -348,22 +405,10 @@ class JointOutputRegionControl(object):
         self.init_joint_region()
 
     def init_joint_region(self):
-        # self.joint_space_region.add_region_multi(qc=np.array([0.7710433735413842, -0.30046383584419534, 0.581439764761865, -2.215658436023894, 0.4053359101811589, 2.7886962782933757, 0.4995608692842497]), \
-        #                                          qbound=0.12, qrbound=0.10, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=10, kr=0.1, \
-        #                                          inner=False, scale=np.ones((7, 1)))
-
-        # self.joint_space_region.add_region_multi(qc=np.array([0.35612043, -0.42095495, 0.31884579, -2.16397413, 0.36776436,2.10526431, 0.45843472]), \
-        #                                          qbound=0.08, qrbound=0.10, \
-        #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-        #                                          kq=100000, kr=1000, \
-        #                                          inner=True, scale=np.ones((7, 1)))
-
-        self.joint_space_region.add_region_multi(qc=np.array([1.35924685,0.01409621,-0.03143654,-2.21992752,  0.24573268,  2.48413623,0.50480508]), \
-                                                 qbound=0.12, qrbound=0.10, \
+        self.joint_space_region.add_region_multi(qc=np.array([1.35924685,0.01409621,-0.03143654,-2.1,  0.24573268,  2.48413623,0.50480508]), \
+                                                 qbound=0.12, qrbound=0.15, \
                                                  mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-                                                 kq=1, kr=0.01, \
+                                                 kq=0.2, kr=0.1, \
                                                  inner=False, scale=np.ones((7, 1)))
         self.singularity_joint = np.array([1.19582476e+00, -1.79016522e-03, 3.56311106e-01, -2.51608346e+00, 4.75119009e-01, 3.31746127e+00, 5.93365287e-01])
         # self.joint_space_region.add_region_multi(qc=self.singularity_joint, \
@@ -371,7 +416,8 @@ class JointOutputRegionControl(object):
         #                                          mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
         #                                          kq=1000000, kr=10000, \
         #                                          inner=True, scale=np.ones((7, 1)))# this is joint sigularity position: inner = True
-        self.joint_space_region.add_region_single(qc = -2.6,qbound=0.2,qrbound=0.3,mask=np.array([0,0,0,1,0,0,0]),kq=1,kr=0.1,inner=True,scale=np.ones((7,1)))
+        self.joint_space_region.add_region_multi(np.array([0, 0, 0, -2.6, 0, 0, 0]), 0.2, 0.4, np.array([0,0,0,1,0,0,0]), kq=1000, kr=100, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
+
     def calc_manipubility(self, J_b):
         det = np.linalg.det(J_b @ J_b.T)
         return math.sqrt(np.abs(det))
@@ -396,6 +442,7 @@ class JointOutputRegionControl(object):
 
 # joint space test code of my adaptive control
 def test_joint_space_region_control(fa):
+    pre_traj = "./data/0716/my_joint_region/has_repulsion/"
     controller = JointOutputRegionControl(sim_or_real='real', fa=fa)
 
     pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
@@ -435,7 +482,7 @@ def test_joint_space_region_control(fa):
         # print(dq_d_)
         dq_d_list.append(dq_d_.reshape(7,).tolist())
         kesi_q_list.append(kesi_q.reshape(7,).tolist())
-        t_list.append(time_start_this_loop)
+        t_list.append(time_start_this_loop-time_start)
         p_list.append(controller.joint_space_region.Ps(q_and_m[0, :7]))
         # msg =JointVelocityCommand()
         # msg.dq_d = dq_d_.reshape(7,)
@@ -469,7 +516,6 @@ def test_joint_space_region_control(fa):
 
         rate_.sleep()
 
-    pre_traj = "./data/0715/my_joint_region/"
     np.save(pre_traj+'q_and_m.npy', q_and_manipubility_list)
     plt.figure()
     ax = plt.subplot(2, 2, 1)
@@ -530,61 +576,44 @@ def plot_figures():
 
 
 if __name__ == '__main__':
-    jsr = JointSpaceRegion()
-    # jsr.add_region_single(qc = -2.6,qbound=0.2,qrbound=0.3,mask=np.array([0,0,0,1,0,0,0]),kq=1,kr=0.1,inner=True,scale=1)
-    jsr.add_region_multi(np.array([0.5, 0.5, 0.5, -2.6, 0.5, 0.5, 0.5]), 0.2, 0.3, np.array([0,0,0,1,0,0,0]), kq=5000, kr=500, inner=True)
-    aaa = np.arange(-3,-2.3,0.02)
-    index = []
-    kesi_list = []
-    P_list = []
-    for i, joint in enumerate(aaa):
-        index.append(aaa[i])
-        q = np.array([0,0,0,joint,0,0,0])
-        kesi_list.append(jsr.kesi_q(q)[0,3])
-        P_list.append(jsr.Ps(q))
-    print(index)
-    print(kesi_list)
-    print(P_list)
 
-    from matplotlib import pyplot as plt
-    plt.figure()
-    plt.plot(aaa, P_list)
+# yxj 20220715
+    # jsr = JointSpaceRegion()
+    # jsr.add_region_multi(qc=np.array([1.35924685,0.01409621,-0.03143654,-2.1,  0.24573268,  2.48413623,0.50480508]), \
+    #                                             qbound=0.12, qrbound=0.15, \
+    #                                             mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
+    #                                             kq=1, kr=0.01, \
+    #                                             inner=False, scale=np.ones((7, 1)))
+    # jsr.add_region_multi(np.array([0.5, 0.5, 0.5, -2.6, 0.5, 0.5, 0.5]), 0.2, 0.3, np.array([0,0,0,1,0,0,0]), kq=5000, kr=500, inner=True)
 
-    plt.figure()
-    plt.plot(aaa, kesi_list)
+    # aaa = np.arange(-3,-2.2,0.02)
+    # index = []
+    # kesi_list = []
+    # P_list = []
+    # for i, joint in enumerate(aaa):
+    #     index.append(aaa[i])
+    #     q = np.array([0,0,0,joint,0,0,0])
+    #     kesi_list.append(jsr.kesi_q(q)[0,3])
+    #     P_list.append(jsr.Ps(q))
+    # q = np.array([0,0,0,-2.4,0,0,0])
 
-    plt.show()
-    # jsr.add_region_multi(np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), 0.08, 0.1, np.array([1, 1, 1, 1, 1, 1, 1]), kq=5000, kr=10, inner=True)
-    
-    # q_test = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
-
-    # fq_s, fqr_s, fq_m, fqr_m = jsr.fq(q_test)
-    # print(fq_s, fqr_s, fq_m, fqr_m)
-    # fq_sin, fqr_sin = jsr.in_region(q_test)
-    # print(fq_sin, fqr_sin)
-    # Ps = jsr.Ps(q_test)
-    # print(Ps)
-    # kesi_q = jsr.kesi_q(q_test)
-    # print(kesi_q)
-
-    # q_test_list = []
-    # qd_list = []
-    # ps_list = []
-    # for qd in np.linspace(0.5, 0.75, 400):
-    #     q_test = np.array([0.5, 0.5, qd, qd, 0.5, 0.5, 0.5])
-    #     ps = jsr.Ps(q_test)
-    #     kesi_q = jsr.kesi_q(q_test)
-    #     q_test_list.append(kesi_q.squeeze())
-    #     qd_list.append(qd)
-    #     ps_list.append(ps)
+    # print([float('%.2f' %i) for i in index])
+    # print([float('%.2f' %i) for i in kesi_list])
+    # print([float('%.2f' %i) for i in P_list])
 
     # from matplotlib import pyplot as plt
     # plt.figure()
-    # plt.plot(qd_list, ps_list)
-    # plt.ylim(0, 0.005)
+    # plt.plot(aaa, P_list)
+    # plt.title('P')
+
+    # plt.figure()
+    # plt.plot(aaa, kesi_list)
+    # plt.title('kesi')
+
     # plt.show()
 
-    # fa = FrankaArm()
-    # test_joint_space_region_control(fa=fa)
+# yxj 20220716
+    fa = FrankaArm()
+    test_joint_space_region_control(fa=fa)
     # plot_figures()
     
