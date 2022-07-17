@@ -235,15 +235,6 @@ class CartesianQuatSpaceRegion(object):
 
 class JointSpaceRegion(object):
     def __init__(self) -> None:
-        self.single_kq = np.zeros((1, 0))
-        self.single_kr = np.zeros((1, 0))
-        self.single_qc = np.zeros((1, 0))
-        self.single_scale = np.zeros((1, 0))
-        self.single_mask = np.zeros((1, 0))
-        self.single_qbound = np.zeros((1, 0))
-        self.single_qrbound = np.zeros((1, 0))
-        self.single_inout = np.zeros((1, 0))
-
         self.multi_kq = np.zeros((1, 0))
         self.multi_kr = np.zeros((1, 0))
         self.multi_qc = np.zeros((7, 0))
@@ -252,16 +243,6 @@ class JointSpaceRegion(object):
         self.multi_qbound = np.zeros((1, 0))
         self.multi_qrbound = np.zeros((1, 0))
         self.multi_inout = np.zeros((1, 0), dtype=np.bool8)  # in => 1, out => (-1)
-
-    def add_region_single(self, qc, qbound, qrbound, mask, kq=1, kr=1, inner=False, scale=1):
-        self.single_kq = np.concatenate((self.single_kq, [[kq]]), axis=1)
-        self.single_kr = np.concatenate((self.single_kr, [[kr]]), axis=1)
-        self.single_qc = np.concatenate((self.single_qc, [[qc]]), axis=1)
-        self.single_scale = np.concatenate((self.single_scale, [[scale]]), axis=1)
-        self.single_mask = np.concatenate((self.single_mask, [[mask]]), axis=1)
-        self.single_qbound = np.concatenate((self.single_qbound, [[qbound]]), axis=1)
-        self.single_qrbound = np.concatenate((self.single_qrbound, [[qrbound]]), axis=1)
-        self.single_inout = np.concatenate((self.single_inout, [[int(inner) * 2 - 1]]), axis=1)
 
     def add_region_multi(self, qc, qbound, qrbound, mask, kq=1, kr=1, inner=False, scale=np.ones((7, 1))):
         self.multi_kq = np.concatenate((self.multi_kq, [[kq]]), axis=1)
@@ -272,26 +253,9 @@ class JointSpaceRegion(object):
         self.multi_qbound = np.concatenate((self.multi_qbound, [[qbound]]), axis=1)
         self.multi_qrbound = np.concatenate((self.multi_qrbound, [[qrbound]]), axis=1)
         self.multi_inout = np.concatenate((self.multi_inout, [[int(inner) * 2 - 1]]), axis=1)
-        print('self.multi_kq',self.multi_kq)
-        print('self.multi_kr',self.multi_kr)
-        print('self.multi_qc',self.multi_qc)
-        print('self.multi_scale',self.multi_scale)
-        print('self.multi_mask',self.multi_mask)
-        print('self.multi_qbound',self.multi_qbound)
-        print('self.multi_qrbound',self.multi_qrbound)
-        print('self.multi_inout',self.multi_inout)
-        print('======================================')
-
 
     def fq(self, q):
-        n_single, n_multi = self.single_qc.shape[1], self.multi_qc.shape[1]  # (1, n_single) and (7, n_multi)
-
-        q = q.reshape(1, 7)
-        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-        fq_single = (q_scale_single - self.single_qc) ** 2 - self.single_qbound ** 2  # (1, n_single)
-        fqr_single = (q_scale_single - self.single_qc) ** 2 - self.single_qrbound ** 2  # (1, n_single)
-        fq_single = fq_single * self.single_inout  # (1, n_single)
-        fqr_single = fqr_single * self.single_inout  # (1, n_single)
+        n_multi = self.multi_qc.shape[1]  # (1, n_single) and (7, n_multi)
 
         q = q.reshape(7, 1)
         q_scale_multi = q * self.multi_scale  # (7, n_multi)
@@ -300,75 +264,23 @@ class JointSpaceRegion(object):
         fq_multi = fq_multi * self.multi_inout  # (1, n_multi)
         fqr_multi = fqr_multi * self.multi_inout  # (1, n_multi)
 
-        # print('fq_single | fqr_single | fq_multi | fqr_multi')
-        # print(fq_single, fqr_single, fq_multi, fqr_multi)
-
-        return fq_single.reshape(1, n_single), fqr_single.reshape(1, n_single), \
-                fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
+        return fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
 
     def in_region(self, q):
-        fq_single, _, fq_multi, _ = self.fq(q)
+        fq_multi, _ = self.fq(q)
 
-        return (fq_single <= 0), (fq_multi <= 0)
+        return (fq_multi <= 0)
 
     def Ps(self, q):
-        fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
+        fq_multi, fqr_multi = self.fq(q)
         Ps = 0
-        Ps = Ps + np.sum(0.5 * self.single_kq * (np.minimum(0, fq_single)) ** 2)
-        Ps = Ps + np.sum(0.5 * self.single_kr * (np.minimum(0, fqr_single)) ** 2)
         Ps = Ps + np.sum(0.5 * self.multi_kq * (np.minimum(0, fq_multi)) ** 2)
         Ps = Ps + np.sum(0.5 * self.multi_kr * (np.minimum(0, fqr_multi)) ** 2)
 
         return Ps
 
-    # def kesi_q(self, q):
-    #     fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
-
-    #     partial_f_q = np.zeros((1, 7))
-    #     q = q.reshape(1, 7)
-    #     q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-    #     for i, idx in enumerate(self.single_mask[0]):
-    #         if fq_single[0, i] < 0:
-    #             partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
-
-    #     q = q.reshape(7, 1)
-    #     q_scale_multi = q * self.multi_scale  # (7, n_multi)
-    #     not_in_region_mask = (fq_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
-    #     partial_f_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask, axis=1).reshape(1, 7)
-
-    #     partial_fr_q = np.zeros((1,7))
-    #     not_in_r_region_mask = (fqr_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
-    #     partial_fr_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_r_region_mask, axis=1).reshape(1, 7)
-
-    #     print('partial_f_q',partial_f_q)
-    #     print('partial_fr_q',partial_fr_q)
-
-    #     kesi_q = np.zeros((1, 7))
-    #     kesi_q = kesi_q + np.sum(self.single_kq * np.minimum(0, fq_single))
-    #     kesi_q = kesi_q + np.sum(self.single_kr * np.minimum(0, fqr_single))
-    #     print('kesi_q_0',kesi_q)
-    #     kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi)) * partial_f_q
-    #     print('kesi_q_1',kesi_q)
-    #     kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi)) * partial_fr_q
-    #     print('kesi_q',kesi_q)
-    #     print('----------------------------')
-    #     print('np.sum(self.multi_kr * np.minimum(0, fqr_multi)) * partial_fr_q',np.sum(self.multi_kr * np.minimum(0, fqr_multi)) * partial_fr_q)
-    #     print('self.multi_kr * np.minimum(0, fqr_multi)',self.multi_kr * np.minimum(0, fqr_multi))
-    #     print('np.sum(self.multi_kr * np.minimum(0, fqr_multi))',np.sum(self.multi_kr * np.minimum(0, fqr_multi)))
-    #     print('partial_fr_q',partial_fr_q)
-
-    #     # kesi_q = kesi_q * partial_f_q
-
-    #     return kesi_q.reshape(1, -1)
     def kesi_q(self, q):
-        fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
-
-        # partial_f_q = np.zeros((1, 7))
-        # q = q.reshape(1, 7)
-        # q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-        # for i, idx in enumerate(self.single_mask[0]):
-        #     if fq_single[0, i] < 0:
-        #         partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
+        fq_multi, fqr_multi = self.fq(q)
 
         q = q.reshape(7, 1)
         q_scale_multi = q * self.multi_scale  # (7, n_multi)

@@ -57,10 +57,12 @@ class MyConstants(object):
     FY_HAT = 2341.164794921875
     U0 = 746.3118044533257
     V0 = 564.2590475570069
-    # CARTESIAN_CENTER = np.array([0.2068108842682527, 0.611158320250102, 0.1342875493162069])
-    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.1342875493162069])
-    IMG_W = 1440
-    IMG_H = 1080
+    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.0342875493162069])
+    CARTESIAN_SIDE_LENGTH = np.array([0.02, 0.02, 0.02]).reshape(1, 3)
+    CARTESIAN_KC = np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3)
+    QUATERNION_QG = np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178])
+    QUATERNION_KO = 15
+    IMG_WH = np.array([1440,1080])
 
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
@@ -230,15 +232,6 @@ class CartesianQuatSpaceRegion(object):
         
 class JointSpaceRegion(object):
     def __init__(self) -> None:
-        self.single_kq = np.zeros((1, 0))
-        self.single_kr = np.zeros((1, 0))
-        self.single_qc = np.zeros((1, 0))
-        self.single_scale = np.zeros((1, 0))
-        self.single_mask = np.zeros((1, 0))
-        self.single_qbound = np.zeros((1, 0))
-        self.single_qrbound = np.zeros((1, 0))
-        self.single_inout = np.zeros((1, 0))
-
         self.multi_kq = np.zeros((1, 0))
         self.multi_kr = np.zeros((1, 0))
         self.multi_qc = np.zeros((7, 0))
@@ -247,16 +240,6 @@ class JointSpaceRegion(object):
         self.multi_qbound = np.zeros((1, 0))
         self.multi_qrbound = np.zeros((1, 0))
         self.multi_inout = np.zeros((1, 0), dtype=np.bool8)  # in => 1, out => (-1)
-
-    def add_region_single(self, qc, qbound, qrbound, mask, kq=1, kr=1, inner=False, scale=1):
-        self.single_kq = np.concatenate((self.single_kq, [[kq]]), axis=1)
-        self.single_kr = np.concatenate((self.single_kr, [[kr]]), axis=1)
-        self.single_qc = np.concatenate((self.single_qc, [[qc]]), axis=1)
-        self.single_scale = np.concatenate((self.single_scale, [[scale]]), axis=1)
-        self.single_mask = np.concatenate((self.single_mask, [[mask]]), axis=1)
-        self.single_qbound = np.concatenate((self.single_qbound, [[qbound]]), axis=1)
-        self.single_qrbound = np.concatenate((self.single_qrbound, [[qrbound]]), axis=1)
-        self.single_inout = np.concatenate((self.single_inout, [[int(inner) * 2 - 1]]), axis=1)
 
     def add_region_multi(self, qc, qbound, qrbound, mask, kq=1, kr=1, inner=False, scale=np.ones((7, 1))):
         self.multi_kq = np.concatenate((self.multi_kq, [[kq]]), axis=1)
@@ -269,14 +252,7 @@ class JointSpaceRegion(object):
         self.multi_inout = np.concatenate((self.multi_inout, [[int(inner) * 2 - 1]]), axis=1)
 
     def fq(self, q):
-        n_single, n_multi = self.single_qc.shape[1], self.multi_qc.shape[1]  # (1, n_single) and (7, n_multi)
-
-        q = q.reshape(1, 7)
-        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-        fq_single = (q_scale_single - self.single_qc) ** 2 - self.single_qbound ** 2  # (1, n_single)
-        fqr_single = (q_scale_single - self.single_qc) ** 2 - self.single_qrbound ** 2  # (1, n_single)
-        fq_single = fq_single * self.single_inout  # (1, n_single)
-        fqr_single = fqr_single * self.single_inout  # (1, n_single)
+        n_multi = self.multi_qc.shape[1]  # (1, n_single) and (7, n_multi)
 
         q = q.reshape(7, 1)
         q_scale_multi = q * self.multi_scale  # (7, n_multi)
@@ -285,48 +261,47 @@ class JointSpaceRegion(object):
         fq_multi = fq_multi * self.multi_inout  # (1, n_multi)
         fqr_multi = fqr_multi * self.multi_inout  # (1, n_multi)
 
-        return fq_single.reshape(1, n_single), fqr_single.reshape(1, n_single), \
-                fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
+        return fq_multi.reshape(1, n_multi), fqr_multi.reshape(1, n_multi)
 
     def in_region(self, q):
-        fq_single, _, fq_multi, _ = self.fq(q)
+        fq_multi, _ = self.fq(q)
 
-        return (fq_single <= 0), (fq_multi <= 0)
+        return (fq_multi <= 0)
 
     def Ps(self, q):
-        fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
+        fq_multi, fqr_multi = self.fq(q)
         Ps = 0
-        Ps = Ps + np.sum(0.5 * self.single_kq * (np.minimum(0, fq_single)) ** 2)
-        Ps = Ps + np.sum(0.5 * self.single_kr * (np.minimum(0, fqr_single)) ** 2)
         Ps = Ps + np.sum(0.5 * self.multi_kq * (np.minimum(0, fq_multi)) ** 2)
         Ps = Ps + np.sum(0.5 * self.multi_kr * (np.minimum(0, fqr_multi)) ** 2)
 
         return Ps
 
     def kesi_q(self, q):
-        fq_single, fqr_single, fq_multi, fqr_multi = self.fq(q)
-
-        partial_f_q = np.zeros((1, 7))
-        q = q.reshape(1, 7)
-        q_scale_single = (q[0, self.single_mask.astype(np.int32)] * self.single_scale)  # (1, n_single)
-        for i, idx in enumerate(self.single_mask[0]):
-            if fq_single[0, i] < 0:
-                partial_f_q[0, idx] += 2 * (q_scale_single[0, i] - self.single_qc[0, i]) * self.single_inout[0, i]
+        fq_multi, fqr_multi = self.fq(q)
 
         q = q.reshape(7, 1)
         q_scale_multi = q * self.multi_scale  # (7, n_multi)
         not_in_region_mask = (fq_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
-        partial_f_q += np.sum(2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask, axis=1).reshape(1, 7)
+        partial_f_q = (2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_region_mask) # (7, n_multi)
+
+        not_in_r_region_mask = (fqr_multi < 0).repeat(7, 0)  # (7, n_multi)  [IMPORTANT] 
+        partial_fr_q = (2 * (q_scale_multi - self.multi_qc) * self.multi_inout * self.multi_mask * not_in_r_region_mask) # (7, n_multi)
+
+        # print('partial_f_q\n',partial_f_q)
+        # print('partial_fr_q\n',partial_fr_q)
 
         kesi_q = np.zeros((1, 7))
-        kesi_q = kesi_q + np.sum(self.single_kq * np.minimum(0, fq_single))
-        kesi_q = kesi_q + np.sum(self.single_kr * np.minimum(0, fqr_single))
-        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi))
-        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi))
-        kesi_q = kesi_q * partial_f_q
-
+        # print('kesi_q_0',kesi_q)
+        kesi_q = kesi_q + np.sum(self.multi_kq * np.minimum(0, fq_multi) * partial_f_q ,axis=1)
+        # print('kesi_q_1',kesi_q)
+        kesi_q = kesi_q + np.sum(self.multi_kr * np.minimum(0, fqr_multi) * partial_fr_q,axis=1)
+        # print('kesi_q',kesi_q)
+        # print('----------------------------')
         return kesi_q.reshape(1, -1)
 
+    def set_kq_kr(self, kq,kr):
+        self.multi_kq = kq
+        self.multi_kr = kr
 
 class AdaptiveRegionController(object):
     """
@@ -359,7 +334,7 @@ class AdaptiveRegionController(object):
         else:  # control with precise Js
             if x is None:
                 # raise ValueError('Target point x on the image plane should not be empty!')
-                x = np.array([MyConstants.IMG_W/2,MyConstants.IMG_H/2])
+                x = MyConstants.IMG_WH/2
             fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT 
             u0, v0 = MyConstants.U0, MyConstants.V0 
             fx, fy = MyConstants.FX_HAT, MyConstants.FY_HAT 
@@ -429,29 +404,23 @@ class AdaptiveRegionController(object):
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
-        self.image_space_region = ImageSpaceRegion(b=np.array([MyConstants.IMG_W, MyConstants.IMG_H]))
+        self.image_space_region = ImageSpaceRegion(b=MyConstants.IMG_WH)
 
         self.cartesian_space_region = CartesianSpaceRegion()
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         self.cartesian_space_region.set_r_c(MyConstants.CARTESIAN_CENTER)  # set by jyp | grasping pose above the second object with marker
         # self.cartesian_space_region.set_c(np.array([0.02, 0.02, 0.02]).reshape(1, 3))
-        self.cartesian_space_region.set_c(np.array([0.03, 0.02, 0.01]).reshape(1, 3))
+        self.cartesian_space_region.set_c(MyConstants.CARTESIAN_SIDE_LENGTH)
         # self.cartesian_space_region.set_Kc(np.array([5e-5, 5e-5, 5e-5]).reshape(1, 3))
-        self.cartesian_space_region.set_Kc(np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3))
+        self.cartesian_space_region.set_Kc(MyConstants.CARTESIAN_KC)
 
         # self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
         # self.cartesian_quat_space_region.set_Ko(60)
-        self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
-        self.cartesian_quat_space_region.set_Ko(15)
-
+        self.cartesian_quat_space_region.set_q_g(MyConstants.QUATERNION_QG)  # grasping pose on the right
+        self.cartesian_quat_space_region.set_Ko(MyConstants.QUATERNION_KO)
 
         self.joint_space_region = JointSpaceRegion()
-        self.singularity_joint = np.array([0.70835316,-1.01122013,0.6055567,-3.0552168,0.71558448,2.28641345,0.06973394])
-        self.joint_space_region.add_region_multi(qc=self.singularity_joint, \
-                                                 qbound=0.50, qrbound=0.45, \
-                                                 mask=np.array([1, 1, 1, 1, 1, 1, 1]), \
-                                                 kq=100, kr=10, \
-                                                 inner=True, scale=np.ones((7, 1)))# this is joint sigularity position: inner = True
+        self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.0, 0, 0, 0]), 0.2, 0.4, np.array([0,0,0,1,0,0,0]), kq=10, kr=5, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
 
     def kesi_x(self, x):
         return self.image_space_region.kesi_x(x.reshape(1, -1))
@@ -616,7 +585,7 @@ class ImageDebug(object):
         bridge = CvBridge()
         img = bridge.imgmsg_to_cv2(data, 'bgr8')
 
-        image_space_region = ImageSpaceRegion(b=np.array([MyConstants.IMG_W, MyConstants.IMG_H]))
+        image_space_region = ImageSpaceRegion(MyConstants.IMG_WH)
         image_space_region.set_x_d(self.goal)
         image_space_region.set_Kv(np.array([2, 1]))
 
@@ -692,7 +661,7 @@ class ImageDebug(object):
 
 # 0712 yxj
 def test_whole_task(fa, allow_update=False):
-    pre_traj = "./data/0712/my_whole_task_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region/"
+    pre_traj = "./data/0717/my_whole_task_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region/"
     os.mkdir(pre_traj)
     desired_position_bias = np.array([-200, -100])
 
@@ -856,8 +825,8 @@ def test_whole_task(fa, allow_update=False):
     plt.figure()
     plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b',label = 'vision trajectory')
     plt.scatter(target[0], target[1],color='r',label = 'desired position')
-    plt.xlim([0,MyConstants.IMG_W])
-    plt.ylim([0,MyConstants.IMG_H])
+    plt.xlim([0,MyConstants.IMG_WH[0]])
+    plt.ylim([0,MyConstants.IMG_WH[1]])
     ax = plt.gca()
     ax.invert_yaxis()
     plt.legend()
@@ -924,6 +893,6 @@ def test_whole_task(fa, allow_update=False):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    test_adaptive_region_control(fa=fa, allow_update=True)
+    test_whole_task(fa=fa, allow_update=True)
     # plot_figures()
     
