@@ -920,6 +920,11 @@ def test_adaptive_region_control(fa, allow_update=False):
     plt.suptitle('Js')
     plt.savefig(pre_traj+'Js.jpg')
 
+    plt.figure()
+    plt.plot(time_list,q_and_manipubility_list[:,0:7],label = 'kesi')
+    plt.title('q')
+    plt.savefig(pre_traj+'q.jpg')
+    
     plt.show()
     info = {'f_list': f_list, \
             'p_list': p_list, \
