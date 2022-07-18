@@ -275,7 +275,7 @@
         ROS自带的cv_bridge只能用python2环境运行，用python3执行需要自行编译cv_bridge包，考虑到项目文件包含较多python3特定语法，一种快速解决方式参考[CSDN](https://blog.csdn.net/qq_43124746/article/details/124347630)
 
 * **0712**
-    * 完成`my_adaptive_control_0712.py`。加入了Js的debug功能(也就是加入了`my_image_debug_real.py`的内容,但是`my_image_debug_real.py`不能单独跑,因为fa只能传入一个程序,无法将`my_image_debug_real.py`和`my_adaptive_control.py`同时跑起来,遂写了`my_adaptive_control_0712.py`)。发现效果很好。
+    * 完成`my_adaptive_control_0712.py`。加入了Js的debug功能(也就是加入了`my_image_debug_real.py`的内容,但是`my_image_debug_real.py`不能单独跑,因为fa只能传入一个程序,无法将`my_image_debug_real.py`和`my_adaptive_control.py`同时跑起来,遂写了`my_adaptive_control_0712.py`)。发现效果还好，只是蓝和红有些不共线。
         跑之前记得`source ~/python3_ws/devel/setup.bash --extend`
     * 限制某些关节进入一些joint region还有问题。
 
@@ -287,8 +287,18 @@
     * 修改`my_adaptive_control_0712.py`代码,
         * 将其中joint region中的`add_region_single`全部去掉了(代码`my_joint_region.py`和`my_adaptive_control.py`中也去掉了),
         * 'kesi_q'已经改成正确的了.(虽然本实验中只有一个region不会出问题)
-    
 
+* **0717**
+    * 完成了相机视角视频记录的代码`save_video.py`，放在包`pylon_camera`中.命令：
+        ```
+        roslaunch pylon_camera camera_aruco_view.launch
+        roslaunch pylon_camera camera_aruco_recording.launch
+        ```
+
+* **0718**
+    * 完成了'my_whole_task.py'
+    * 对`my_adaptive_control_0712.py`进行debug，发现之前蓝红不共线的原因是`image_debug`类中的`Kv`和实际的`Kv`方向不同导致的。改了之后就共线了。
+    * 用`my_adaptive_control_0712.py`进行了3组实验，数据在`data\0718\`中。分别是`Js_wrong`,`Js_real`,`Js_update`.
 ### 常用命令
 1. 启动仿真环境
    * 启动Gazebo

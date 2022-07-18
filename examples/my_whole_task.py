@@ -27,7 +27,7 @@ import pickle
 
 from franka_example_controllers.msg import JointVelocityCommand
 from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
-from frankapy.proto import JointPositionVelocitySensorMessage, ShouldTerminateSensorMessage
+from frankapy.proto import JointPositionVelocitySensorMessage, JointPositionSensorMessage, ShouldTerminateSensorMessage
 from franka_interface_msgs.msg import SensorDataGroup
 from frankapy import FrankaArm,SensorDataMessageType
 from frankapy import FrankaConstants as FC
@@ -43,7 +43,12 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import numpy as np
 
-from my_adaptive_control import ImageSpaceRegion
+import copy
+
+from my_dmp.processing import *
+from my_dmp.dmp_class import *
+
+# from my_adaptive_control import ImageSpaceRegion
 # from gazebo.my_test_jyp import compute_R_c2i
 
 
@@ -404,7 +409,7 @@ class AdaptiveRegionController(object):
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
-        self.image_space_region = ImageSpaceRegion(b=MyConstants.IMG_WH)
+        self.image_space_region = ImageSpaceRegion(b=copy.deepcopy(MyConstants.IMG_WH))
 
         self.cartesian_space_region = CartesianSpaceRegion()
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
@@ -539,7 +544,7 @@ class FrankaInfoStruct(object):
 desired_position_bias = np.array([-200, -100])
 
 class ImageDebug(object):
-    def __init__(self, fa):
+    def __init__(self, fa, ada_controller):
         # self.nh_ = rospy.init_node('image_debugging', anonymous=True)
         self.img_sub = rospy.Subscriber('/aruco_simple/result', Image, callback=self.image_callback, queue_size=1)
         self.pixel1_sub = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, callback=self.pixel1_callback, queue_size=1)
@@ -553,6 +558,7 @@ class ImageDebug(object):
         self.data_c = FrankaInfoStruct()
         self.pose_ready = False
         self.fa = fa
+        self.ada_controller = ada_controller
 
     def get_Js(self,data_c): # COPIED from image_debug.py, to get real Js! yxj 0712
         x = data_c.x.reshape(-1,)
@@ -585,12 +591,12 @@ class ImageDebug(object):
         bridge = CvBridge()
         img = bridge.imgmsg_to_cv2(data, 'bgr8')
 
-        image_space_region = ImageSpaceRegion(MyConstants.IMG_WH)
-        image_space_region.set_x_d(self.goal)
-        image_space_region.set_Kv(np.array([2, 1]))
+        # image_space_region = ImageSpaceRegion(copy.deepcopy(MyConstants.IMG_WH))
+        # image_space_region.set_x_d(self.goal)
+        # image_space_region.set_Kv(np.array([2, 1]))
 
         if self.pixel1 is not None:
-            kesi_x = image_space_region.kesi_x(self.pixel1.reshape(1, 2)).reshape(-1,)
+            kesi_x = self.ada_controller.image_space_region.kesi_x(self.pixel1.reshape(1, 2)).reshape(-1,)
             kesi_x = kesi_x / np.linalg.norm(kesi_x, ord=2)
             end_of_kesi_arrow = self.pixel1 - 150 * kesi_x
             cv2.arrowedLine(img, (round(self.pixel1[0]), round(self.pixel1[1])), 
@@ -658,11 +664,174 @@ class ImageDebug(object):
     def main(self):
         rospy.spin()
 
+# ============================================================
+def reset_arm_with_recorded_traj(fa, traj, reset_time):
+    assert reset_time > 10
+
+    franka_arm_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+    traj_inv = traj[::-1]
+    fa.goto_joints(joints=traj_inv[0], duration=reset_time + 1, dynamic=True, buffer_time=10,
+                   joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES, ignore_virtual_walls=True)
+    init_time = rospy.Time.now().to_time()
+    i = 0
+
+    rate = rospy.Rate(len(traj_inv) / reset_time)
+    
+    while not rospy.is_shutdown():
+        i += 1
+        if i >= len(traj_inv):
+            break
+        traj_gen_proto_msg = JointPositionSensorMessage(
+            id=i, timestamp=rospy.Time.now().to_time() - init_time, 
+            joints=traj_inv[i]
+        )
+        ros_msg = make_sensor_group_msg(
+            trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+            traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION)
+        )
+        
+        rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.id))
+        franka_arm_pub.publish(ros_msg)
+        rate.sleep()
+
+    term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - init_time, should_terminate=True)
+    ros_msg = make_sensor_group_msg(
+        termination_handler_sensor_msg=sensor_proto2ros_msg(
+            term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
+        )
+    franka_arm_pub.publish(ros_msg)
+    rospy.loginfo('Done')
+
+def compute_tau_for_franka_interface(tau, expert_traj_len, record_hz, execute_hz=1000):
+    """
+        compute the parameter tau in 'joint_dmp_info', which will be passed to execute_joint_dmp,
+        and further used by franka-interface: joint_dmp_trajectory_generator.cpp
+        @params:
+            - tau: the ratio of time, which is (T_recording / T_executing)
+            - expert_traj_len: the number of points included in expert trajectory
+            - record_hz: the number of points included in expert trajectory per second
+            - execute_hz: the frequency of franka interface, default is 1000
+    """
+    return tau * (record_hz / execute_hz) * (100 / expert_traj_len)
+
+def my_make_joint_dmp_info(tau, alpha_y, beta_y, num_dims, num_basis, alpha_x, mu, h, weights):
+    return {
+        'tau': tau,
+        'alpha': alpha_y,
+        'beta': beta_y,
+        'num_dims': num_dims,
+        'num_basis': num_basis,
+        'num_sensors': alpha_x,
+        'mu': mu if isinstance(mu, list) else mu.reshape(-1).tolist(),
+        'h': h if isinstance(h, list) else h.reshape(-1).tolist(),
+        'phi_j': np.ones(num_basis),
+        'weights': weights if isinstance(weights, list) else weights.tolist(),
+    }
+
+
+def place(fa,pre_traj,record_frequency=10,execute_frequency=1000,run_time=21):
+    # load recorded trajectory
+    state_dict = pickle.load(open('./data/0416/traj.pkl', "rb" ) )
+    my_goal = None
+    my_y0 = None
+
+    for key in state_dict.keys():
+        skill_dict = state_dict[key]
+        
+        if skill_dict["skill_description"] == "GuideMode":
+            skill_state_dict = skill_dict["skill_state_dict"]
+            expert_trajectory_time = skill_state_dict["time_since_skill_started"]
+    
+    # get joint trajectory, goal, and initial joint angles
+    q = state_dict[0]["skill_state_dict"]['q']
+    my_goal = copy.deepcopy(q[-1, :])
+    my_y0 = copy.deepcopy(q[0, :])
+
+    # change goal position in joint space
+    my_goal = [-0.09787809, -1.01912609, -0.71364178, -2.47889868, -2.11014511, 1.54519812, -0.75279362]
+
+    # train joint dmp
+    dt = 1 / len(q)  # set dt for dmp and cs = (1 / traj_data_points)
+    dmp_trajectory = MyDMPTrajectory(dt=dt, num_dims=7, num_basis=42)
+    weights = dmp_trajectory.train(q.transpose(1, 0))
+
+    joint_dmp_info = {'mu': dmp_trajectory.mu_all,
+                    'h': dmp_trajectory.h_all,
+                    'weights': weights,
+                    }
+
+    # save joint dmp weights
+    save_path = pre_traj+'joint_dmp_weights.pkl'
+    with open(save_path, 'wb') as pkl_f:
+        pickle.dump(joint_dmp_info, pkl_f, protocol=2)
+
+    # load dmp weights trained before
+    with open(save_path, "rb") as pkl_f:
+        joint_dmp_info_dict = pickle.load(pkl_f)
+
+    mu, h = joint_dmp_info_dict['mu'], joint_dmp_info_dict['h']
+    weights = joint_dmp_info_dict['weights']
+
+    tau = compute_tau_for_franka_interface(tau=1,
+                                        expert_traj_len=len(q),
+                                        record_hz=record_frequency,
+                                        execute_hz=execute_frequency)
+
+    alpha_y = 60.0
+    beta_y = alpha_y / 4
+    alpha_x = 1.0
+    num_basis = 42
+    num_dims = 7
+
+    # =====================================run
+    print('Starting joint dmp')
+    
+    joint_dmp_info = my_make_joint_dmp_info(tau=tau,
+                                            alpha_y=alpha_y,
+                                            beta_y=beta_y,
+                                            num_dims=num_dims,
+                                            num_basis=num_basis,
+                                            alpha_x=alpha_x,
+                                            mu=mu,
+                                            h=h,
+                                            weights=weights
+                                            )
+
+    test_rounds = 1
+
+    joints_memory, pose_trans_memory, pose_rot_memory, execution_time = [], [], [], []
+
+    fa.execute_joint_dmp(joint_dmp_info=joint_dmp_info, 
+                                duration=run_time, 
+                                use_impedance=True,
+                                k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
+                                d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 10.0],
+                                initial_sensor_values=my_goal if isinstance(my_goal, list) else my_goal.reshape(-1).tolist(),
+                                block=False)
+
+    timer = rospy.Rate(50)
+    start_time = time.time()
+    while True:
+        end_time = time.time()
+        if (end_time - start_time) >= run_time:
+            break
+        joints_memory.append(fa.get_joints().tolist())
+        pose_trans_memory.append(fa.get_pose().translation)
+        pose_rot_memory.append(fa.get_pose().rotation)
+        execution_time.append(end_time - start_time)
+        timer.sleep()
+
+    print('The robot has reached the goal!')
+
+    fa.open_gripper()
+
+    time.sleep(3)
+
+    reset_arm_with_recorded_traj(fa = fa, traj = copy.deepcopy(joints_memory), reset_time=run_time)
+
 
 # 0712 yxj
-def test_whole_task(fa, allow_update=False):
-    pre_traj = "./data/0717/my_whole_task_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region/"
-    os.mkdir(pre_traj)
+def pick(fa, allow_update=False, pre_traj = '/data/'):
     desired_position_bias = np.array([-200, -100])
 
     class vision_collection(object):
@@ -690,7 +859,7 @@ def test_whole_task(fa, allow_update=False):
 
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionController(fa)
-    img_debug = ImageDebug(fa)
+    img_debug = ImageDebug(fa,controller_adaptive)
 
     # nh_ = rospy.init_node('cartesian_joint_space_region_testbench', anonymous=True)
     sub_vision_1_ = rospy.Subscriber('/aruco_simple/pixel1', PointStamped, data_c.vision_1_callback, queue_size=1)
@@ -798,6 +967,15 @@ def test_whole_task(fa, allow_update=False):
                 term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
             )
             pub.publish(ros_msg)
+
+            fa.goto_gripper(width=0.02, 
+                            grasp=True,
+                            speed=0.04,
+                            force=0.5,
+                            block=True)
+            joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
+            fa.goto_joints(joints=joints, block=True)
+
             break
 
         rate_.sleep()
@@ -818,7 +996,7 @@ def test_whole_task(fa, allow_update=False):
     plt.plot(time_list, pixel_1_list,color='b',label = 'vision position')
     plt.plot(time_list, pixel_2_list+desired_position_bias,color='r',label = 'desired position')
     plt.legend()
-    plt.ylim([0,MyConstants.IMG_W])
+    plt.ylim([0,MyConstants.IMG_WH[0]])
     plt.title('vision position vs time')
     plt.savefig(pre_traj+'vision_position.jpg')
 
@@ -872,7 +1050,7 @@ def test_whole_task(fa, allow_update=False):
     plt.suptitle('Js')
     plt.savefig(pre_traj+'Js.jpg')
 
-    plt.show()
+    # plt.show()
     info = {'f_list': f_list, \
             'p_list': p_list, \
             'kesi_x_list': kesi_x_list, \
@@ -891,8 +1069,12 @@ def test_whole_task(fa, allow_update=False):
 
 
 if __name__ == '__main__':
+    pre_traj = "./data/0718/my_whole_task_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region/"
+    os.mkdir(pre_traj)
     fa = FrankaArm()
+    fa.open_gripper()
     # test_joint_space_region_control(fa=fa)
-    test_whole_task(fa=fa, allow_update=True)
+    pick(fa=fa, allow_update=True, pre_traj = pre_traj)
+    place(fa=fa,pre_traj=pre_traj)
     # plot_figures()
     
