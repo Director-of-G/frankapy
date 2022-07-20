@@ -276,7 +276,10 @@
 
 * **0712**
     * 完成`my_adaptive_control_0712.py`。加入了Js的debug功能(也就是加入了`my_image_debug_real.py`的内容,但是`my_image_debug_real.py`不能单独跑,因为fa只能传入一个程序,无法将`my_image_debug_real.py`和`my_adaptive_control.py`同时跑起来,遂写了`my_adaptive_control_0712.py`)。发现效果还好，只是蓝和红有些不共线。
-        跑之前记得`source ~/python3_ws/devel/setup.bash --extend`
+        跑之前记得
+        ```
+        source ~/python3_ws/devel/setup.bash --extend
+        ```
     * 限制某些关节进入一些joint region还有问题。
 
 * **0714**
@@ -299,6 +302,9 @@
     * 完成了'my_whole_task.py'
     * 对`my_adaptive_control_0712.py`进行debug，发现之前蓝红不共线的原因是`image_debug`类中的`Kv`和实际的`Kv`方向不同导致的。改了之后就共线了。
     * 用`my_adaptive_control_0712.py`进行了3组实验，数据在`data\0718\`中。分别是`Js_wrong`,`Js_real`,`Js_update`.
+
+* **0719**
+    * dirty method for `my_adaptive_control_0712.py`: 笛卡尔空间y方向会绕一个弯，解决办法：将Ko调小，即让方向收敛比位置收敛慢。（新的组合方法之后再思考）
 ### 常用命令
 1. 启动仿真环境
    * 启动Gazebo

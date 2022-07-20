@@ -24,7 +24,7 @@ class HololensPosition():
 
     def Init_node2(self):
         rospy.init_node(self.name)
-        sub = rospy.Subscriber("HololensJointManipulation", PointStamped, self.callback2)
+        sub = rospy.Subscriber("HoloLens_d", PointStamped, self.callback2)
         print('Initialization done!')
         return sub
 

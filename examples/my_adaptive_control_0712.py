@@ -60,8 +60,13 @@ class MyConstants(object):
     # CARTESIAN_CENTER = np.array([0.2068108842682527, 0.611158320250102, 0.1342875493162069])
     # CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.1342875493162069])
     CARTESIAN_CENTER = np.array([0.17, 0.63, 0.19])
+    CARTESIAN_SIDE_LENGTH = np.array([0.05, 0.04, 0.05]).reshape(1, 3)
+    CARTESIAN_KC = np.array([1e-6, 4e-6, 1e-4]).reshape(1, 3)
+    QUATERNION_QG = np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178])
+    QUATERNION_KO = 15
     IMG_W = 1440
     IMG_H = 1080
+    IMG_WH = np.array([1440,1080])
 
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
@@ -204,6 +209,7 @@ class CartesianQuatSpaceRegion(object):
         J_rot_matBC = np.dot(np.array(J_rot_matBC), np.array([math.acos(norm_r_o/2)/(2*norm_r_o**2), math.sin(norm_r_o/2)/(norm_r_o**3)]))
         pass
 
+    # deprecated
     def kesi_rq(self, q:np.ndarray):  # q => (4,)
         q, q_g = Quat(q).unit_(), self.q_g.unit_()
         q_o, q_g_inv = q.quat, q_g.inverse_().quat
@@ -219,7 +225,7 @@ class CartesianQuatSpaceRegion(object):
         partial_P_q = (-(self.Ko / norm_u) * np.maximum(0, fo) * partial_v_q * (norm_u > 0)).reshape(1, 4)
         J_rot = q.jacobian_rel2_axis_angle_()  # (4, 3)
 
-        return (partial_P_q @ J_rot).reshape(1, -1)
+        return 0.1 *(partial_P_q @ J_rot).reshape(1, -1)
 
     def kesi_rq_omega(self, q:np.ndarray):
         q, q_g = Quat(q).unit_(), self.q_g.unit_()
@@ -422,13 +428,11 @@ class AdaptiveRegionController(object):
         self.cartesian_space_region = CartesianSpaceRegion()
         self.cartesian_quat_space_region = CartesianQuatSpaceRegion()
         self.cartesian_space_region.set_r_c(MyConstants.CARTESIAN_CENTER)  # set by jyp | grasping pose above the second object with marker
-        self.cartesian_space_region.set_c(np.array([0.05, 0.04, 0.05]).reshape(1, 3))
-        self.cartesian_space_region.set_Kc(np.array([1e-6, 4e-6, 1e-4]).reshape(1, 3))
+        self.cartesian_space_region.set_c(MyConstants.CARTESIAN_SIDE_LENGTH)
+        self.cartesian_space_region.set_Kc(MyConstants.CARTESIAN_KC)
 
-        # self.cartesian_quat_space_region.set_q_g(np.array([-0.17492908847362298, 0.6884405719242297, 0.6818253503208791, 0.17479727175084528]))  # set by jyp | grasping pose above the second object with marker
-        # self.cartesian_quat_space_region.set_Ko(60)
-        self.cartesian_quat_space_region.set_q_g(np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178]))  # grasping pose on the right
-        self.cartesian_quat_space_region.set_Ko(15)
+        self.cartesian_quat_space_region.set_q_g(MyConstants.QUATERNION_QG)  # grasping pose on the right
+        self.cartesian_quat_space_region.set_Ko(MyConstants.QUATERNION_KO)
 
         self.joint_space_region = JointSpaceRegion()
         self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.0, 0, 0, 0]), 0.2, 0.4, np.array([0,0,0,1,0,0,0]), kq=10, kr=5, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
@@ -485,7 +489,7 @@ class AdaptiveRegionController(object):
         if self.cartesian_quat_space_region.fo(Quat(r_o)) <= 0:
             kesi_rq = np.zeros((1, 3))
         else:
-            kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 2 # (1, 3)
+            kesi_rq = self.cartesian_quat_space_region.kesi_rq_omega(r_o) / 5 # (1, 3)
         kesi_rall = np.r_[kesi_r.T, kesi_rq.T]  # (6, 1)
         self.kesi_rall = kesi_rall
 
@@ -550,6 +554,8 @@ class AdaptiveRegionController(object):
         
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
         kesi_rt = self.kesi_r(r_tran).reshape(-1, 1)  # (3, 1)
+
+        print('kesi_rt/distance: ', kesi_rt/(r_tran-MyConstants.CARTESIAN_CENTER))
         kesi_rq = self.kesi_rq(r_quat)  # (1, 4) @ (4, 3) = (1, 3)
         kesi_rall = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
         kesi_q = self.kesi_q(q).reshape(-1, 1)  # (7, 1)
@@ -700,8 +706,8 @@ class ImageDebug(object):
 
 
 # 0702 yxj
-def test_adaptive_region_control(fa, allow_update=False):
-    pre_traj = "./data/0718/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region_Js_update/"
+def test_adaptive_region_control(fa, update_mode=0):
+    pre_traj = "./data/0719/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region_Js_update/"
     os.mkdir(pre_traj)
     desired_position_bias = np.array([-200, -100])
 
@@ -728,7 +734,7 @@ def test_adaptive_region_control(fa, allow_update=False):
         def is_data_with_vision_1_ready(self):
             return self.vision_1_ready & self.vision_2_ready
 
-    update_mode = 1 # update_mode=0: true Js; -1:wrong Js no update; 1:wrong Js do update
+    # update_mode=0: true Js; -1:wrong Js no update; 1:wrong Js do update
     data_c = vision_collection()
     controller_adaptive = AdaptiveRegionController(fa,update_mode=update_mode)
     img_debug = ImageDebug(fa)
@@ -748,7 +754,7 @@ def test_adaptive_region_control(fa, allow_update=False):
             target[0] = target[0]+desired_position_bias[0]
             target[1] = target[1]+desired_position_bias[1]
             controller_adaptive.image_space_region.set_x_d(target)
-            controller_adaptive.image_space_region.set_Kv(np.array([2, 1]) / 10)
+            controller_adaptive.image_space_region.set_Kv(np.array([2, 1]) / 5)
             print('vision region is set!')
             print(data_c.x2)
             print(target)
@@ -788,9 +794,11 @@ def test_adaptive_region_control(fa, allow_update=False):
         """
             region information
         """
+
         print('In Cartesian Region: ', controller_adaptive.cartesian_space_region.in_region(pose.translation.reshape(-1,)))
         print('In Quat Region: ', controller_adaptive.cartesian_quat_space_region.in_region(pose.quaternion.reshape(-1,)))
         print('In joint Region: ', controller_adaptive.joint_space_region.in_region(q_and_m[0, :7]))
+        print('In vision Region: ', )
         print('Current xyz: ', pose.translation.reshape(-1,))
 
         """
@@ -893,13 +901,33 @@ def test_adaptive_region_control(fa, allow_update=False):
     plt.title('quaternion vs time')
     plt.savefig(pre_traj+'cartesian_quat.jpg')
 
+    def plot_transparent_cube(ax,alpha_ = 0.1,x=10,y=20,z=30,dx=40,dy=50,dz=60):
+        xx = np.linspace(x,x+dx,2)
+        yy = np.linspace(y,y+dy,2)
+        zz = np.linspace(z,z+dz,2)
+
+        xx2,yy2 = np.meshgrid(xx,yy)
+        ax.plot_surface(xx2,yy2,np.full_like(xx2,z),alpha=alpha_,color='r')
+        ax.plot_surface(xx2,yy2,np.full_like(xx2,z+dz),alpha=alpha_,color='r')
+
+        yy2,zz2 = np.meshgrid(yy,zz)
+        ax.plot_surface(np.full_like(yy2,x),yy2,zz2,alpha=alpha_,color='r')
+        ax.plot_surface(np.full_like(yy2,x+dx),yy2,zz2,alpha=alpha_,color='r')
+
+        xx2,zz2 = np.meshgrid(xx,zz)
+        ax.plot_surface(xx2,np.full_like(yy2,y),zz2,alpha=alpha_,color='r')
+        ax.plot_surface(xx2,np.full_like(yy2,y+dy),zz2,alpha=alpha_,color='r')
+
     plt.figure()
     ax1 = plt.axes(projection='3d')
     position_array  = np.array(position_list)
     ax1.plot3D(position_array[:,0],position_array[:,1],position_array[:,2],label='traj')
     ax1.scatter(position_array[0,0],position_array[0,1],position_array[0,2],c='r',label='initial')
-    ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
+    # ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
     ax1.scatter(MyConstants.CARTESIAN_CENTER[0],MyConstants.CARTESIAN_CENTER[1],MyConstants.CARTESIAN_CENTER[2],c='g',label='goal region center')
+    c = MyConstants.CARTESIAN_SIDE_LENGTH.reshape(-1,)
+    plot_transparent_cube(ax1,0.1,MyConstants.CARTESIAN_CENTER[0]-c[0],MyConstants.CARTESIAN_CENTER[1]-c[1],MyConstants.CARTESIAN_CENTER[2]-c[2],
+    2*c[0],2*c[1],2*c[2])
     ax1.legend()
     ax1.set_xlabel('x/m')
     ax1.set_ylabel('y/m')
@@ -946,6 +974,6 @@ def test_adaptive_region_control(fa, allow_update=False):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    test_adaptive_region_control(fa=fa, allow_update=False)
+    test_adaptive_region_control(fa=fa, update_mode=1)
     # plot_figures()
     

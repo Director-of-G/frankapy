@@ -62,9 +62,10 @@ class MyConstants(object):
     FY_HAT = 2341.164794921875
     U0 = 746.3118044533257
     V0 = 564.2590475570069
-    CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.0342875493162069])
-    CARTESIAN_SIDE_LENGTH = np.array([0.02, 0.02, 0.02]).reshape(1, 3)
-    CARTESIAN_KC = np.array([1e-7, 1e-7, 1e-7]).reshape(1, 3)
+    # CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.0342875493162069])
+    CARTESIAN_CENTER = np.array([0.17, 0.63, 0.20])
+    CARTESIAN_SIDE_LENGTH = np.array([0.05, 0.04, 0.05]).reshape(1, 3)
+    CARTESIAN_KC = np.array([1e-6, 4e-6, 1e-4]).reshape(1, 3)
     QUATERNION_QG = np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178])
     QUATERNION_KO = 15
     IMG_WH = np.array([1440,1080])
@@ -1023,13 +1024,33 @@ def pick(fa, allow_update=False, pre_traj = '/data/'):
     plt.title('quaternion vs time')
     plt.savefig(pre_traj+'cartesian_quat.jpg')
 
+    def plot_transparent_cube(ax,alpha_ = 0.1,x=10,y=20,z=30,dx=40,dy=50,dz=60):
+        xx = np.linspace(x,x+dx,2)
+        yy = np.linspace(y,y+dy,2)
+        zz = np.linspace(z,z+dz,2)
+
+        xx2,yy2 = np.meshgrid(xx,yy)
+        ax.plot_surface(xx2,yy2,np.full_like(xx2,z),alpha=alpha_,color='r')
+        ax.plot_surface(xx2,yy2,np.full_like(xx2,z+dz),alpha=alpha_,color='r')
+
+        yy2,zz2 = np.meshgrid(yy,zz)
+        ax.plot_surface(np.full_like(yy2,x),yy2,zz2,alpha=alpha_,color='r')
+        ax.plot_surface(np.full_like(yy2,x+dx),yy2,zz2,alpha=alpha_,color='r')
+
+        xx2,zz2 = np.meshgrid(xx,zz)
+        ax.plot_surface(xx2,np.full_like(yy2,y),zz2,alpha=alpha_,color='r')
+        ax.plot_surface(xx2,np.full_like(yy2,y+dy),zz2,alpha=alpha_,color='r')
+
     plt.figure()
     ax1 = plt.axes(projection='3d')
     position_array  = np.array(position_list)
     ax1.plot3D(position_array[:,0],position_array[:,1],position_array[:,2],label='traj')
     ax1.scatter(position_array[0,0],position_array[0,1],position_array[0,2],c='r',label='initial')
-    ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
+    # ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
     ax1.scatter(MyConstants.CARTESIAN_CENTER[0],MyConstants.CARTESIAN_CENTER[1],MyConstants.CARTESIAN_CENTER[2],c='g',label='goal region center')
+    c = MyConstants.CARTESIAN_SIDE_LENGTH.reshape(-1,)
+    plot_transparent_cube(ax1,0.1,MyConstants.CARTESIAN_CENTER[0]-c[0],MyConstants.CARTESIAN_CENTER[1]-c[1],MyConstants.CARTESIAN_CENTER[2]-c[2],
+    2*c[0],2*c[1],2*c[2])
     ax1.legend()
     ax1.set_xlabel('x/m')
     ax1.set_ylabel('y/m')
@@ -1069,7 +1090,7 @@ def pick(fa, allow_update=False, pre_traj = '/data/'):
 
 
 if __name__ == '__main__':
-    pre_traj = "./data/0718/my_whole_task_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region/"
+    pre_traj = "./data/0719/my_whole_task_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region/"
     os.mkdir(pre_traj)
     fa = FrankaArm()
     fa.open_gripper()

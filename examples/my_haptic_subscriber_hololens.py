@@ -24,7 +24,8 @@ import math
 from transformations import quaternion_from_matrix
 from examples.my_hololens_reader import HololensPosition
 
-FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0503"
+# FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0503"
+FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0720S/my_haptic_subscriber_hololens/"
 
 def start_franka_arm():
     fa = FrankaArm()
@@ -54,7 +55,6 @@ def create_formated_skill_dict(joints, end_effector_positions, time_since_skill_
     # The key (0 here) usually represents the absolute time when the skill was started but
     formatted_dict = {0: skill_dict}
     return formatted_dict
-
 
 def pose_format(pose_data):
     """
@@ -225,7 +225,7 @@ class haptic_subscrbe_handler(object):
         time_since_skill_started = []
 
         hololens_reader = HololensPosition()
-        holo_sub = rospy.Subscriber("HololensJointManipulation", PointStamped, hololens_reader.callback2)
+        holo_sub = rospy.Subscriber("HoloLens_d", PointStamped, hololens_reader.callback2)
 
         rospy.loginfo("You can start moving omega 3 now!")
         start_time = time.time()
@@ -265,39 +265,45 @@ class haptic_subscrbe_handler(object):
             r = pose_format(self.franka_arm.get_pose())
             J = self.franka_arm.get_jacobian(q_now)  # (6, 7)
             J_inv = np.linalg.pinv(J)  # (7, 6)
-            N = np.eye(7) - np.dot(J_inv, J)
+            J_pos = J[:3,:]
+            J_pos_inv = np.linalg.pinv(J_pos)
+            # N = np.eye(7) - np.dot(J_inv, J)
+            N = np.eye(7) - np.dot(J_pos_inv, J_pos)
 
 #===============================================
-            # joint4pos_my = hololens_reader.joint4pos
-            # J_hololens = self.franka_arm.get_jacobian_joint4(q_now)
-            # J_hololens_3d = J_hololens[:3,:]
-            # d1_3_dimension = np.dot(np.linalg.pinv(J_hololens_3d),joint4pos_my.reshape([3,1]))
-            # d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
-            # d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
+            joint4pos_my = hololens_reader.joint4pos
+            J_hololens = self.franka_arm.get_jacobian_joint4(q_now)
+            J_hololens_3d = J_hololens[:3,:]
+            d1_3_dimension = np.dot(np.linalg.pinv(J_hololens_3d),joint4pos_my.reshape([3,1]))
+            d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
+            d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
+            d = np.reshape(d,(7,1))
+
 #===============================================
 
             # calculate the velocity ut
-            ut = - np.dot(J_inv, np.dot(self.Kp, error_format(r,self.r_d)))
+            # ut = - np.dot(J_inv, np.dot(self.Kp, error_format(r,self.r_d)))
+            ut = - J_inv @ self.Kp @ error_format(r,self.r_d)
             # 计算un
-#===============================================这两段放出来角度就出错
-            # un = -np.dot(N, np.dot(np.linalg.inv(self.Cd), d))
-#===============================================
-            if t - start_time > 5 and t - start_time < 7:
-                # d = -np.reshape(np.array([-0.2, -0.2, 0.2, 0.2, 0.2, 0.1, 0.1], float), (7, 1))
-                joint4pos_my = np.array([0,0.2,0])
-                J_hololens = self.franka_arm.get_jacobian_joint4(q_now)
-                J_hololens_3d = J_hololens[:3,:]
-                d1_3_dimension = np.dot(np.linalg.pinv(J_hololens_3d),joint4pos_my.reshape((3,1)))
-                d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
-                d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
-                d = np.reshape(d,(7,1))
-                print('d',d)
+            un = N @ np.linalg.inv(self.Cd) @ d
 
-                un = N @ np.linalg.inv(self.Cd) @ d
-                print('un',un)
-                # pass 
-            else:
-                un = np.zeros((7,1))
+#===============================================
+            # if t - start_time > 5 and t - start_time < 7:
+            #     # d = -np.reshape(np.array([-0.2, -0.2, 0.2, 0.2, 0.2, 0.1, 0.1], float), (7, 1))
+            #     joint4pos_my = np.array([0,0.2,0])
+            #     J_hololens = self.franka_arm.get_jacobian_joint4(q_now)
+            #     J_hololens_3d = J_hololens[:3,:]
+            #     d1_3_dimension = np.dot(np.linalg.pinv(J_hololens_3d),joint4pos_my.reshape((3,1)))
+            #     d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
+            #     d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
+            #     d = np.reshape(d,(7,1))
+            #     print('d',d)
+
+            #     un = N @ np.linalg.inv(self.Cd) @ d
+            #     print('un',un)
+            #     # pass 
+            # else:
+            #     un = np.zeros((7,1))
 
             v = ut+un
             v = np.reshape(np.array(v), [-1,])
@@ -306,7 +312,7 @@ class haptic_subscrbe_handler(object):
             v[v < -0.30] = -0.30
 
             send_v.append(v)
-            send_t.append(t)
+            send_t.append(t-start_time)
 
             traj_gen_proto_msg = JointPositionVelocitySensorMessage(
                 id=i, timestamp=timestamp, 
@@ -346,34 +352,38 @@ class haptic_subscrbe_handler(object):
         lines = plt.plot(send_t,real_translation)
         plt.legend(lines, labels)
         plt.plot(send_t,desired_translation)
-        plt.title("real_translation and desired_translation")
-        plt.show()
+        plt.title("real translation and desired translation")
+
         plt.figure(3)
         plt.plot(real_quat)
         plt.plot(desired_quat)
-        plt.show()
+        plt.title("real quaternion and desired quaternion")
+ 
         plt.figure(4)
         plt.plot(desired_translation_diff.tolist())
-        plt.show()
+        plt.title("translation error")
+
         plt.figure(5)
         plt.plot(desired_quat_diff.tolist())
-        plt.show()
+
         plt.figure(6)
         # labels = [1,2,3,4,5,6,7]
         # for y,label in zip(send_v,labels):
         #     plt.plot(y,label = label)
-        plt.plot(send_v,label = ['1','2','3','4','5','6','7'])
+        plt.plot(send_t,send_v,label = ['1','2','3','4','5','6','7'])
         plt.legend()
+
         plt.show()
+        
         print(desired_translation_diff.shape)
         print(desired_quat_diff.shape)
 
         # save trajectory
         if self.save_traj:
             skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started)
-            with open(FILE_NAME + '/traj.pkl', 'wb') as pkl_f:
+            with open(FILE_NAME + 'traj.pkl', 'wb') as pkl_f:
                 pkl.dump(skill_dict, pkl_f)
-                print("Did save skill dict: {}".format(FILE_NAME + '/traj.pkl'))
+                print("Did save skill dict: {}".format(FILE_NAME + 'traj.pkl'))
         
         exit()
 
@@ -383,15 +393,15 @@ if __name__ == '__main__':
     # constants
     parser.add_argument('--width_y', '-wy', type=str, default=0.55,  # 0.45
                         help='The maximum distance that end effector can move from home position along the y axis.')
-    parser.add_argument('--angle_y', '-ay', type=str, default=70,
+    parser.add_argument('--angle_y', '-ay', type=str, default=90,
                         help='The maximum angle that end effector can rotate around the y axis.')
     parser.add_argument('--haptic_scale', '-hs', type=str, default=6,  # 4
                         help='The moving distance ratio of Franka end effector and haptic.')
-    parser.add_argument('--record_time', '-rt', type=str, default=10,
+    parser.add_argument('--record_time', '-rt', type=str, default=50,
                         help='Time length of the trajectory teaching.')
     parser.add_argument('--record_rate', '-rr', type=str, default=10,
                         help='Frequency of trajectory recording.')
-    parser.add_argument('--save_traj', '-st', action='store_true', default=False)
+    parser.add_argument('--save_traj', '-st', action='store_true', default=True)
 
     args = parser.parse_args()
 
