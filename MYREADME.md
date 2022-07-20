@@ -305,6 +305,9 @@
 
 * **0719**
     * dirty method for `my_adaptive_control_0712.py`: 笛卡尔空间y方向会绕一个弯，解决办法：将Ko调小，即让方向收敛比位置收敛慢。（新的组合方法之后再思考）
+
+* **0720**
+    * 进一步修改了`my_haptic_subscriber_hololens.py`。目前nullspace只针对末端位置，这样就能用hololens微调末端的角度，不影响omega决定的末端位置。
 ### 常用命令
 1. 启动仿真环境
    * 启动Gazebo

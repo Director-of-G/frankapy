@@ -25,7 +25,7 @@ from transformations import quaternion_from_matrix
 from examples.my_hololens_reader import HololensPosition
 
 # FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0503"
-FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0720S/my_haptic_subscriber_hololens/"
+FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0720/my_haptic_subscriber_hololens/"
 
 def start_franka_arm():
     fa = FrankaArm()
@@ -278,6 +278,8 @@ class haptic_subscrbe_handler(object):
             d1_3_dimension = np.asarray(d1_3_dimension).reshape(-1)
             d = np.concatenate((d1_3_dimension,np.array([0,0,0,0])),axis=0)
             d = np.reshape(d,(7,1))
+            # d = np.array([[0],[0],[0],[0],[0],[0],[0]])
+            
 
 #===============================================
 
@@ -347,6 +349,14 @@ class haptic_subscrbe_handler(object):
         from matplotlib import pyplot as plt
         desired_translation_diff = np.array(desired_translation)[1:] - np.array(desired_translation)[:-1]
         desired_quat_diff = np.array(desired_quat)[1:] - np.array(desired_quat)[:-1]
+        
+                # save trajectory
+        if self.save_traj:
+            skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started)
+            with open(FILE_NAME + 'traj.pkl', 'wb') as pkl_f:
+                pkl.dump(skill_dict, pkl_f)
+                print("Did save skill dict: {}".format(FILE_NAME + 'traj.pkl'))
+        
         plt.figure(2)
         labels = ['x','y','z']
         lines = plt.plot(send_t,real_translation)
@@ -361,31 +371,24 @@ class haptic_subscrbe_handler(object):
  
         plt.figure(4)
         plt.plot(desired_translation_diff.tolist())
-        plt.title("translation error")
-
+        plt.title("delta desired translation")
+        
         plt.figure(5)
         plt.plot(desired_quat_diff.tolist())
+        plt.title("delta desired quaternion")
 
         plt.figure(6)
         # labels = [1,2,3,4,5,6,7]
         # for y,label in zip(send_v,labels):
         #     plt.plot(y,label = label)
-        plt.plot(send_t,send_v,label = ['1','2','3','4','5','6','7'])
-        plt.legend()
+        plt.plot(send_t,send_v)
+        plt.legend(['1','2','3','4','5','6','7'])
+        plt.title("send_v")
 
         plt.show()
         
         print(desired_translation_diff.shape)
         print(desired_quat_diff.shape)
-
-        # save trajectory
-        if self.save_traj:
-            skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started)
-            with open(FILE_NAME + 'traj.pkl', 'wb') as pkl_f:
-                pkl.dump(skill_dict, pkl_f)
-                print("Did save skill dict: {}".format(FILE_NAME + 'traj.pkl'))
-        
-        exit()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

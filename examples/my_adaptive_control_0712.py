@@ -68,6 +68,7 @@ class MyConstants(object):
     IMG_H = 1080
     IMG_WH = np.array([1440,1080])
 
+pre_traj = "./data/0720/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region_Js_update/"
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
         self.x_d = x_d  # (1, 2)
@@ -555,7 +556,8 @@ class AdaptiveRegionController(object):
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
         kesi_rt = self.kesi_r(r_tran).reshape(-1, 1)  # (3, 1)
 
-        print('kesi_rt/distance: ', kesi_rt/(r_tran-MyConstants.CARTESIAN_CENTER))
+        print('kesi_rt/distance: ', kesi_rt.reshape(-1,)/(r_tran-MyConstants.CARTESIAN_CENTER)).reshape(-1) # yxj 0720
+
         kesi_rq = self.kesi_rq(r_quat)  # (1, 4) @ (4, 3) = (1, 3)
         kesi_rall = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
         kesi_q = self.kesi_q(q).reshape(-1, 1)  # (7, 1)
@@ -582,7 +584,7 @@ class FrankaInfoStruct(object):
         self.trans = np.array([0, 0, 0])
         self.quat = np.array([0, 0, 0, 0])
 
-desired_position_bias = np.array([-200, -100])
+desired_position_bias = np.array([-170, -100])
 
 class ImageDebug(object):
     def __init__(self, fa):
@@ -707,9 +709,8 @@ class ImageDebug(object):
 
 # 0702 yxj
 def test_adaptive_region_control(fa, update_mode=0):
-    pre_traj = "./data/0719/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region_Js_update/"
     os.mkdir(pre_traj)
-    desired_position_bias = np.array([-200, -100])
+    desired_position_bias = np.array([-170, -100])
 
     class vision_collection(object):
         def __init__(self) -> None:
@@ -798,7 +799,7 @@ def test_adaptive_region_control(fa, update_mode=0):
         print('In Cartesian Region: ', controller_adaptive.cartesian_space_region.in_region(pose.translation.reshape(-1,)))
         print('In Quat Region: ', controller_adaptive.cartesian_quat_space_region.in_region(pose.quaternion.reshape(-1,)))
         print('In joint Region: ', controller_adaptive.joint_space_region.in_region(q_and_m[0, :7]))
-        print('In vision Region: ', )
+        print('In vision Region: ', controller_adaptive.image_space_region.in_region(data_c.x1))
         print('Current xyz: ', pose.translation.reshape(-1,))
 
         """
