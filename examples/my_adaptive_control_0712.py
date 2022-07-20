@@ -400,7 +400,8 @@ class AdaptiveRegionController(object):
 
             # Js initialization for adaptive control
             if update_mode !=0:
-                Js_hat_for_init = np.array([[-1000,0,-1000,-1000,-1000,1000],[0,1000,1000,-1000,-1000,1000]])
+                # Js_hat_for_init = np.array([[-500,0,-500,-100,-100,100],[0,500,500,-100,-100,100]])
+                Js_hat_for_init = np.array([[-500,0,-500,-500,-500,500], [0,500,500,-500,-500,500]])
                 self.Js_hat = Js_hat_for_init
 
         if L is not None:
@@ -420,7 +421,7 @@ class AdaptiveRegionController(object):
             # raise ValueError('Matrix W_hat should not be empty!')
         self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
 
-        cfg = {'n_dim': 3,'n_k_per_dim': 10,'sigma': 1,'pos_restriction': np.array([[-0.3, 0.7], [-0.3, 0.7], [0, 1]])}
+        cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4],[0.35,0.95],[-0.2,0.4]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
@@ -556,7 +557,7 @@ class AdaptiveRegionController(object):
         kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
         kesi_rt = self.kesi_r(r_tran).reshape(-1, 1)  # (3, 1)
 
-        print('kesi_rt/distance: ', kesi_rt.reshape(-1,)/(r_tran-MyConstants.CARTESIAN_CENTER)).reshape(-1) # yxj 0720
+        # print('kesi_rt/distance: ', kesi_rt.reshape(-1,)/(r_tran-MyConstants.CARTESIAN_CENTER)).reshape(-1) # yxj 0720
 
         kesi_rq = self.kesi_rq(r_quat)  # (1, 4) @ (4, 3) = (1, 3)
         kesi_rall = np.r_[kesi_rt, kesi_rq.reshape(3, 1)]  # (6, 1)
@@ -880,6 +881,9 @@ def test_adaptive_region_control(fa, update_mode=0):
     plt.savefig(pre_traj+'vision_position.jpg')
 
     plt.figure()
+    pixel_1_list = np.array(pixel_1_list)
+    pixel_1_pos_value_mask = (pixel_1_list[:, 0] >= 0) & (pixel_1_list[:, 1] >= 0)
+    pixel_1_list = pixel_1_list[pixel_1_pos_value_mask, :].tolist()
     plt.plot(np.array(pixel_1_list)[:,0], np.array(pixel_1_list)[:,1],color='b',label = 'vision trajectory')
     plt.scatter(target[0], target[1],color='r',label = 'desired position')
     plt.xlim([0,MyConstants.IMG_W])
