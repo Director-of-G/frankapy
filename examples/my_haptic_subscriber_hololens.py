@@ -328,6 +328,10 @@ class haptic_subscrbe_handler(object):
             )
             
             i += 1
+            
+            if self.gripper_state=="opened":
+                break
+
             rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.timestamp))
             self.franka_arm_pub.publish(ros_msg)
 
