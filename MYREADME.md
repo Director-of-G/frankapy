@@ -308,6 +308,11 @@
 
 * **0720**
     * 进一步修改了`my_haptic_subscriber_hololens.py`。目前nullspace只针对末端位置，这样就能用hololens微调末端的角度，不影响omega决定的末端位置。
+
+* **0721**
+    * 完成了exp1。demonstration的代码是`my_haptic_subscriber_hololens.py`,数据存在`0721`文件夹中，画图文件是`0720/draw0721.py`。execution的代码是`my_run_joint_dmp.py`
+    
+    
 ### 常用命令
 1. 启动仿真环境
    * 启动Gazebo
