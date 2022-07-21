@@ -149,7 +149,7 @@ class RadialBF(object):  # radial basis function(RBF) class
             self.rbf_sigma2_ = np.array(self.sigma) ** 2
 
     def get_rbf_(self, r):
-        r = r.reshape(1, 3)
+        r = r.reshape(1, self.n_dim)
         # print(r - self.rbf_c_)
         # print((np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2).shape)
         # print((2 * self.rbf_sigma2_).reshape(-1).shape)

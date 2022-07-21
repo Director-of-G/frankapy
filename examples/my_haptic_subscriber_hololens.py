@@ -25,7 +25,7 @@ from transformations import quaternion_from_matrix
 from examples.my_hololens_reader import HololensPosition
 
 # FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0503"
-FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0720/my_haptic_subscriber_hololens/"
+FILE_NAME = "/home/roboticslab/yxj/frankapy/data/0721/my_haptic_subscriber_hololens/"
 
 def start_franka_arm():
     fa = FrankaArm()
@@ -46,11 +46,14 @@ def start_franka_arm():
 
     return fa
 
-def create_formated_skill_dict(joints, end_effector_positions, time_since_skill_started):
+def create_formated_skill_dict(joints, end_effector_positions, time_since_skill_started,log_d,desired_translation,desired_quat):
     skill_dict = dict(skill_description='GuideMode', skill_state_dict=dict())
     skill_dict['skill_state_dict']['q'] = np.array(joints)
     skill_dict['skill_state_dict']['O_T_EE'] = np.array(end_effector_positions)
     skill_dict['skill_state_dict']['time_since_skill_started'] = np.array(time_since_skill_started)
+    skill_dict['skill_state_dict']['log_d'] = np.array(log_d)
+    skill_dict['skill_state_dict']['desired_translation'] = np.array(desired_translation)
+    skill_dict['skill_state_dict']['desired_quat'] = np.array(desired_quat)
 
     # The key (0 here) usually represents the absolute time when the skill was started but
     formatted_dict = {0: skill_dict}
@@ -223,6 +226,7 @@ class haptic_subscrbe_handler(object):
         end_effector_position = []
         joints = []
         time_since_skill_started = []
+        log_d = []
 
         hololens_reader = HololensPosition()
         holo_sub = rospy.Subscriber("HoloLens_d", PointStamped, hololens_reader.callback2)
@@ -248,6 +252,7 @@ class haptic_subscrbe_handler(object):
             end_effector_position.append(pose_array)
             joints.append(self.franka_arm.get_joints())
             time_since_skill_started.append(time.time() - start_time)
+            
 
             translation = copy.deepcopy(self.pose_ee_0).translation + np.array(copy.deepcopy(self.position_ee_d))
             timestamp = rospy.Time.now().to_time() - self.init_time
@@ -280,7 +285,7 @@ class haptic_subscrbe_handler(object):
             d = np.reshape(d,(7,1))
             # d = np.array([[0],[0],[0],[0],[0],[0],[0]])
             
-
+            log_d.append(d)
 #===============================================
 
             # calculate the velocity ut
@@ -328,14 +333,14 @@ class haptic_subscrbe_handler(object):
             )
             
             i += 1
-            
-            if self.gripper_state=="opened":
-                break
 
             rospy.loginfo('Publishing: ID {}'.format(traj_gen_proto_msg.timestamp))
             self.franka_arm_pub.publish(ros_msg)
 
             rate.sleep()
+
+            if self.gripper_state=="opened":
+                break
 
         term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - start_time, should_terminate=True)
         ros_msg = make_sensor_group_msg(
@@ -344,7 +349,7 @@ class haptic_subscrbe_handler(object):
         )
         self.franka_arm_pub.publish(ros_msg)
 
-        self.franka_arm.goto_gripper(0.02,grasp=True,speed=0.04,force=3,block=True)
+        # self.franka_arm.goto_gripper(0.02,grasp=True,speed=0.04,force=3,block=True)
         time.sleep(2)
         self.franka_arm.reset_joints(block=True)
 
@@ -356,7 +361,7 @@ class haptic_subscrbe_handler(object):
         
                 # save trajectory
         if self.save_traj:
-            skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started)
+            skill_dict = create_formated_skill_dict(joints, end_effector_position, time_since_skill_started,log_d,desired_translation,desired_quat)
             with open(FILE_NAME + 'traj.pkl', 'wb') as pkl_f:
                 pkl.dump(skill_dict, pkl_f)
                 print("Did save skill dict: {}".format(FILE_NAME + 'traj.pkl'))

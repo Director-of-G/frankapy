@@ -421,7 +421,8 @@ class AdaptiveRegionController(object):
             # raise ValueError('Matrix W_hat should not be empty!')
         self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
 
-        cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4],[0.35,0.95],[-0.2,0.4]])}
+        # cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4],[0.35,0.95],[-0.2,0.4]])}
+        cfg = {'n_dim':2,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4],[0.35,0.95]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
@@ -452,6 +453,7 @@ class AdaptiveRegionController(object):
         return self.joint_space_region.kesi_q(q.reshape(1, 7))
 
     def get_theta(self, r):
+        r = r.reshape(-1,)[:self.theta.n_dim]
         return self.theta.get_rbf_(r)
 
     def update_Js_with_ps(self, x, quat):
