@@ -4,8 +4,12 @@ import numpy as np
 import pickle
 from scipy.spatial.transform import Rotation as R
 
-pre_traj = '/home/roboticslab/yxj/frankapy/data/0721/my_haptic_subscriber_hololens/'
-# pre_traj = 'C:/Users/yan/Documents/GitHub/frankapy/data/0721/my_haptic_subscriber_hololens/'
+label_font = {'family': 'serif', 'size': 15}
+tick_size = 10
+legend_size = 10
+
+# pre_traj = '/home/roboticslab/yxj/frankapy/data/0721/my_haptic_subscriber_hololens/'
+pre_traj = 'C:/Users/yan/Documents/GitHub/frankapy/data/0721/my_haptic_subscriber_hololens/'
 traj_path = pre_traj+'traj.pkl'  
 
 class MyConstants(object):
@@ -54,13 +58,14 @@ with open(traj_path, 'rb') as f1:
     desired_translation = data2[0]['skill_state_dict']['desired_translation']
     desired_quat = data2[0]['skill_state_dict']['desired_quat']
 
-    # plot q
-    plt.figure()
-    plt.plot(time_list,q)
-    plt.title('joint angle')
-    plt.xlabel('time/s')
-    plt.ylabel('angle/rad')
-    plt.savefig(pre_traj+'q.jpg')
+    # # plot q
+    # plt.figure()
+    # plt.plot(time_list,q)
+    # plt.title('joint angle')
+    # plt.xlabel('time/s')
+    # plt.ylabel('angle/rad')
+    # plt.savefig(pre_traj+'exp1_q.jpg', pad_inches = 0.012, bbox_inches = 'tight', dpi = 300)
+    # plt.savefig(pre_traj+'exp1_q.pdf', pad_inches = 0.012, bbox_inches = 'tight')
 
     # plot position
     print(O_T_EE.shape)
@@ -77,7 +82,6 @@ with open(traj_path, 'rb') as f1:
         quat = ori.as_quat()[[3, 0, 1, 2]]
         quat_list.append(quat)
 
-    plt.figure()
     ax1 = plt.axes(projection='3d')
     position_array  = np.array(position_list)
     ax1.plot3D(position_array[:,0],position_array[:,1],position_array[:,2],label='traj')
@@ -85,38 +89,37 @@ with open(traj_path, 'rb') as f1:
     plt.gca().set_box_aspect(( max(position_array[:,0])-min(position_array[:,0]), 
                                max(position_array[:,1])-min(position_array[:,1]), 
                                max(position_array[:,2])-min(position_array[:,2])))
-    # ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
-    # ax1.scatter(MyConstants.CARTESIAN_CENTER[0],MyConstants.CARTESIAN_CENTER[1],MyConstants.CARTESIAN_CENTER[2],c='g',label='goal region center')
-    # print(position_list)
-    ax1.legend(['traj','initial'])
-    ax1.set_xlabel('x/m')
-    ax1.set_ylabel('y/m')
-    ax1.set_zlabel('z/m')
-    plt.title('demonstration trajectory 3D')
-    plt.savefig(pre_traj+'demonstration_3d.jpg')
+    ax1.legend(['traj','initial'],loc=5)
+    ax1.set_xlabel('x/m', fontdict = label_font)
+    ax1.set_ylabel('y/m', fontdict = label_font)
+    ax1.set_zlabel('z/m', fontdict = label_font)
+    plt.yticks(fontsize = tick_size)
+    plt.xticks(np.arange(0.29, 0.37, step=0.03),fontsize = tick_size)
+
+    plt.savefig(pre_traj+'demonstration_3d.jpg', pad_inches = 0.012, bbox_inches = 'tight', dpi = 300)
 
 
-    # plot quat
-    plt.figure()
-    plt.plot(time_list[:], quat_list[:])
-    plt.title('quaternion vs time')
-    plt.savefig(pre_traj+'demonstration_quat.jpg')
+    # # plot quat
+    # plt.figure()
+    # plt.plot(time_list[:], quat_list[:])
+    # plt.title('quaternion vs time')
+    # plt.savefig(pre_traj+'demonstration_quat.jpg')
 
-    # plot log_d
-    plt.figure()
-    plt.subplot(3,1,1)
-    plt.plot(time_list, log_d.reshape(time_list.shape[0],-1))
-    plt.title('human intention vs time')
+    # # plot log_d
+    # plt.figure()
+    # plt.subplot(3,1,1)
+    # plt.plot(time_list, log_d.reshape(time_list.shape[0],-1))
+    # plt.title('human intention vs time')
 
-    # plot desered_translation-position_list
-    plt.subplot(3,1,2)
-    plt.plot(time_list, desired_translation-position_array)
-    plt.title('translation diff vs time')
+    # # plot desered_translation-position_list
+    # plt.subplot(3,1,2)
+    # plt.plot(time_list, desired_translation-position_array)
+    # plt.title('translation diff vs time')
 
-    plt.subplot(3,1,3)
-    plt.plot(time_list, desired_quat-np.array(quat_list))
-    plt.title('orientation diff vs time')
-    plt.savefig(pre_traj+'log_d.jpg')
+    # plt.subplot(3,1,3)
+    # plt.plot(time_list, desired_quat-np.array(quat_list))
+    # plt.title('orientation diff vs time')
+    # plt.savefig(pre_traj+'log_d.jpg')
 
 
     plt.show()
