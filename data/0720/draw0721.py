@@ -4,8 +4,8 @@ import numpy as np
 import pickle
 from scipy.spatial.transform import Rotation as R
 
-# pre_traj = '/home/roboticslab/yxj/frankapy/data/0720/my_haptic_subscriber_hololens/'
-pre_traj = 'C:/Users/yan/Documents/GitHub/frankapy/data/0721/my_haptic_subscriber_hololens/'
+pre_traj = '/home/roboticslab/yxj/frankapy/data/0721/my_haptic_subscriber_hololens/'
+# pre_traj = 'C:/Users/yan/Documents/GitHub/frankapy/data/0721/my_haptic_subscriber_hololens/'
 traj_path = pre_traj+'traj.pkl'  
 
 class MyConstants(object):

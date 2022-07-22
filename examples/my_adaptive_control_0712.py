@@ -67,8 +67,9 @@ class MyConstants(object):
     IMG_W = 1440
     IMG_H = 1080
     IMG_WH = np.array([1440,1080])
+    KESI_X_SCALE = 0.25
 
-pre_traj = "./data/0720/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_joint_region_Js_update/"
+pre_traj = "./data/0721/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_Js_no_update/"
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
         self.x_d = x_d  # (1, 2)
@@ -401,15 +402,28 @@ class AdaptiveRegionController(object):
             # Js initialization for adaptive control
             if update_mode !=0:
                 # Js_hat_for_init = np.array([[-500,0,-500,-100,-100,100],[0,500,500,-100,-100,100]])
-                Js_hat_for_init = np.array([[-500,0,-500,-500,-500,500], [0,500,500,-500,-500,500]])
+                # Js_hat_for_init = np.array([[-500,0,-500,-500,-500,500], [0,500,500,-500,-500,500]])
+                Js_hat_for_init = np.array([[-5000, 0, -1000, -100, -100, 100], \
+                                            [-300, 4500, 1000, -100, -100, 100]])
                 self.Js_hat = Js_hat_for_init
+
+        """
+            adaptive control with xyz coordinates
+        """
+        # cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4], [0.35,0.95], [-0.2,0.4]])}
+        """
+            adaptive control with xy coordinates
+        """
+        cfg = {'n_dim':2,'n_k_per_dim':75,'sigma':1,'pos_restriction':np.array([[0.05,0.35],[0.50,0.70]])}
+        self.theta = RadialBF(cfg=cfg)
+        self.theta.init_rbf_()
 
         if L is not None:
             if L.shape != (self.n_k, self.n_k):  # (1000, 1000)
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            self.L = np.eye(1000) * 1000
+            self.L = np.eye(self.theta.n_k) * 3000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -417,14 +431,9 @@ class AdaptiveRegionController(object):
                 raise ValueError('Dimension of W_hat should be ' + str((2 * self.m, self.n_k)) + '!')
             self.W_hat = W_hat
         else:
-            self.W_hat = np.zeros((2*6,1000)) # initial all w are zeros
+            self.W_hat = np.zeros((2*6, self.theta.n_k)) # initial all w are zeros
             # raise ValueError('Matrix W_hat should not be empty!')
         self.W_init_flag = False  # inf W_hat has been initialized, set the flag to True
-
-        # cfg = {'n_dim':3,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4],[0.35,0.95],[-0.2,0.4]])}
-        cfg = {'n_dim':2,'n_k_per_dim':10,'sigma':1,'pos_restriction':np.array([[-0.2,0.4],[0.35,0.95]])}
-        self.theta = RadialBF(cfg=cfg)
-        self.theta.init_rbf_()
 
         self.image_space_region = ImageSpaceRegion(b=np.array([MyConstants.IMG_W, MyConstants.IMG_H]))
 
@@ -454,7 +463,9 @@ class AdaptiveRegionController(object):
 
     def get_theta(self, r):
         r = r.reshape(-1,)[:self.theta.n_dim]
-        return self.theta.get_rbf_(r)
+        rbf = self.theta.get_rbf_(r)
+        print('Dimension for vector theta: %d' % rbf.reshape(-1,).shape[0])
+        return rbf
 
     def update_Js_with_ps(self, x, quat):
         ee_pose_quat = quat[[1, 2, 3, 0]]
@@ -484,7 +495,7 @@ class AdaptiveRegionController(object):
     def get_u(self, J, d, r_t, r_o, q, x, with_vision=False, update_mode = 0):
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
-        kesi_x = self.kesi_x(x).reshape(-1, 1)  # (2, 1)
+        kesi_x = MyConstants.KESI_X_SCALE * self.kesi_x(x).reshape(-1, 1)  # (2, 1)
 
         if with_vision:
             self.cartesian_quat_space_region.set_Ko(15)
@@ -539,17 +550,6 @@ class AdaptiveRegionController(object):
 
         theta = self.get_theta(r_tran).reshape(-1, 1)  # get the neuron values theta(r) (1000*1)
         if not self.W_init_flag:
-            """
-                Initial Method #1
-            """
-            # self.W_hat[:, 0] = self.Js_hat.reshape(-1,) / theta[0]
-            """
-                Initial Method #2
-            """
-            # self.W_hat = np.random.rand(12, 1000)
-            """
-                Initial Method #3
-            """
             for r_idx in range(self.W_hat.shape[0]):
                 self.W_hat[r_idx, :] = (self.Js_hat.flatten()[r_idx] / np.sum(theta))
             self.W_init_flag = True
@@ -818,7 +818,7 @@ def test_adaptive_region_control(fa, update_mode=0):
             dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=True, update_mode=update_mode)
         else:
             dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=False, update_mode=update_mode)
-        # print('Js: ', controller_adaptive.Js_hat)
+        print('Js: ', controller_adaptive.Js_hat)
         
         time_now = rospy.Time.now().to_time() - time_start
         traj_gen_proto_msg = JointPositionVelocitySensorMessage(

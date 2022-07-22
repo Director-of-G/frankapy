@@ -104,7 +104,7 @@ if __name__ == '__main__':
                               see franka_interface: joint_dmp_trajectory_generator.cpp for details.')
 
     # other constants
-    parser.add_argument('--run_time', '-rt', type=float, default=31.0)
+    parser.add_argument('--run_time', '-rt', type=float, default=30.0)
     parser.add_argument('--tau', '-tau', type=float, default=1)
 
     args = parser.parse_args()
@@ -223,6 +223,7 @@ if __name__ == '__main__':
         #                 speed=0.04,
         #                 force=0.5,
         #                 block=True)
+
         print('Resetting robot to home joints and home gripper!')
 
         """
@@ -261,7 +262,12 @@ if __name__ == '__main__':
     fa.open_gripper()
 
     time.sleep(3)
+    np.save(args.save_path + '/joints_angle_memory.npy', joints_memory)
+    np.save(args.save_path + '/ee_trans_memory.npy', pose_trans_memory)
+    np.save(args.save_path + '/ee_rot_memory.npy', pose_rot_memory)
+    np.save(args.save_path + '/execution_time.npy', execution_time)
 
+    print('data saved!')
     reset_arm_with_recorded_traj(copy.deepcopy(joints_memory), reset_time=args.run_time)
 
     """
