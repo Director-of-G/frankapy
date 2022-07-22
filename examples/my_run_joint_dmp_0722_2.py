@@ -224,6 +224,7 @@ if __name__ == '__main__':
 
     print('Resetting robot to home joints and home gripper!')
 
+    time.sleep(3)
     """
         DEFAULT_K_GAINS = [600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0]
         DEFAULT_D_GAINS = [50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0]
@@ -267,7 +268,7 @@ if __name__ == '__main__':
     np.save(args.save_path + '/execution_time.npy', execution_time)
 
     print('data are saved!')
-    reset_arm_with_recorded_traj(fa,copy.deepcopy(joints_memory), reset_time=args.run_time)
+    reset_arm_with_recorded_traj(fa,copy.deepcopy(joints_memory), reset_time=15)
 
     """
     # plot the joint angles sent by franka-interface

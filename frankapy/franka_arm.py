@@ -851,7 +851,7 @@ class FrankaArm:
 
         goal = skill.create_goal()
         
-
+        print("i am going to send the goals!!!")
         self._send_goal(goal,
                         cb=lambda x: skill.feedback_callback(x),
                         block=block,
