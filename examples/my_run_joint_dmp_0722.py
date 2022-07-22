@@ -202,62 +202,61 @@ if __name__ == '__main__':
                                             weights=weights
                                             )
 
-    test_rounds = 1
 
     joints_memory, pose_trans_memory, pose_rot_memory, execution_time = [], [], [], []
-    for iter in range(test_rounds):
-        print('==============================>')
-        print('round: (%d/%d) ' % (iter, test_rounds))
-        print('Resetting robot to home joints!')
-        print('Current goal: ', my_goal)
-        print('Psi mu: ', mu)
-        print('Psi h: ', h)
 
-        joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
-        fa.goto_joints(joints=joints, block=True)
+    print('==============================>')
+    print('Resetting robot to home joints!')
+    print('Current goal: ', my_goal)
+    print('Psi mu: ', mu)
+    print('Psi h: ', h)
 
-        # fa.open_gripper(block=True)
-        # time.sleep(3)
-        # fa.goto_gripper(width=0.02, 
-        #                 grasp=True,
-        #                 speed=0.04,
-        #                 force=0.5,
-        #                 block=True)
+    joints = [0, -np.pi / 4, 0, -3 * np.pi / 4, 0, np.pi / 2, -np.pi / 4]
+    fa.goto_joints(joints=joints, block=True)
 
-        print('Resetting robot to home joints and home gripper!')
+    fa.open_gripper(block=True)
+    time.sleep(3)
+    fa.goto_gripper(width=0.02, 
+                    grasp=True,
+                    speed=0.04,
+                    force=0.5,
+                    block=True)
 
-        """
-            DEFAULT_K_GAINS = [600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0]
-            DEFAULT_D_GAINS = [50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0]
-        """
+    print('Resetting robot to home joints and home gripper!')
 
-        """
-            Good params
-            k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
-            d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 25.0]
-        """
+    """
+        DEFAULT_K_GAINS = [600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0]
+        DEFAULT_D_GAINS = [50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0]
+    """
 
-        fa.execute_joint_dmp(joint_dmp_info=joint_dmp_info, 
-                             duration=args.run_time, 
-                             use_impedance=True,
-                             k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
-                             d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 10.0],
-                             initial_sensor_values=my_goal if isinstance(my_goal, list) else my_goal.reshape(-1).tolist(),
-                             block=False)
+    """
+        Good params
+        k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
+        d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 25.0]
+    """
 
-        timer = rospy.Rate(50)
-        start_time = time.time()
-        while True:
-            end_time = time.time()
-            if (end_time - start_time) >= args.run_time:
-                break
-            joints_memory.append(fa.get_joints().tolist())
-            pose_trans_memory.append(fa.get_pose().translation)
-            pose_rot_memory.append(fa.get_pose().rotation)
-            execution_time.append(end_time - start_time)
-            timer.sleep()
+    fa.execute_joint_dmp(joint_dmp_info=joint_dmp_info, 
+                            duration=args.run_time, 
+                            use_impedance=True,
+                            k_gains=[600.0, 600.0, 600.0, 600.0, 200.0, 150.0, 50.0],
+                            d_gains=[50.0, 50.0, 50.0, 25.0, 25.0, 25.0, 10.0],
+                            initial_sensor_values=my_goal if isinstance(my_goal, list) else my_goal.reshape(-1).tolist(),
+                            block=False)
 
-        print('The robot has reached the goal!')
+    timer = rospy.Rate(50) # Note that recording rate is 50Hz! while execution rate is 1000Hz, demonstration rate is 10Hz
+    start_time = time.time()
+
+    while True:
+        end_time = time.time()
+        if (end_time - start_time) >= args.run_time:
+            break
+        joints_memory.append(fa.get_joints().tolist())
+        pose_trans_memory.append(fa.get_pose().translation)
+        pose_rot_memory.append(fa.get_pose().rotation)
+        execution_time.append(end_time - start_time)
+        timer.sleep()
+
+    print('The robot has reached the goal!')
 
     fa.open_gripper()
 
@@ -267,8 +266,8 @@ if __name__ == '__main__':
     np.save(args.save_path + '/ee_rot_memory.npy', pose_rot_memory)
     np.save(args.save_path + '/execution_time.npy', execution_time)
 
-    print('data saved!')
-    reset_arm_with_recorded_traj(copy.deepcopy(joints_memory), reset_time=args.run_time)
+    print('data are saved!')
+    reset_arm_with_recorded_traj(fa,copy.deepcopy(joints_memory), reset_time=args.run_time)
 
     """
     # plot the joint angles sent by franka-interface
@@ -283,15 +282,9 @@ if __name__ == '__main__':
     # plot the history joint angles Franka acutually executed
     plt.subplot(2, 2, 4)
     plt.plot(execution_time, joints_memory)
-    np.save(args.save_path + '/joints_angle_memory.npy', joints_memory)
     plt.show()
 
     # plot the history end effector translation Franka acutually executed
     plt.figure()
     plt.plot(execution_time, pose_trans_memory)
-    np.save(args.save_path + '/ee_trans_memory.npy', pose_trans_memory)
     plt.show()
-
-    # plot the history end effector rotation Franka acutually executed
-    np.save(args.save_path + '/ee_rot_memory.npy', pose_rot_memory)
-    np.save(args.save_path + '/execution_time.npy', execution_time)
