@@ -4,7 +4,8 @@ import numpy as np
 import pickle
 import pdb
 
-pre_traj = '/home/roboticslab/yxj/frankapy/data/0722/my_adaptive_control_20220723_163653_with_Js_no_update/'
+pre_traj = '/home/roboticslab/yxj/frankapy/data/0723/my_adaptive_control_20220723_171220_with_Js_no_update/'
+print(pre_traj)
 traj_path = pre_traj+'data.pkl'  
 
 class MyConstants(object):

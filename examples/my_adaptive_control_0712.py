@@ -65,17 +65,19 @@ class MyConstants(object):
     V0 = 564.2590475570069
     # CARTESIAN_CENTER = np.array([0.2068108842682527, 0.611158320250102, 0.1342875493162069])
     # CARTESIAN_CENTER = np.array([-0.0068108842682527, 0.611158320250102, 0.1342875493162069])
-    CARTESIAN_CENTER = np.array([0.17, 0.63, 0.19])
-    CARTESIAN_SIDE_LENGTH = np.array([0.05, 0.04, 0.05]).reshape(1, 3)
-    CARTESIAN_KC = np.array([1e-6, 4e-6, 1e-4]).reshape(1, 3)
+    # CARTESIAN_CENTER = np.array([0.17, 0.55, 0.20])
+    CARTESIAN_CENTER = np.array([0.09343, 0.56261, 0.20943])
+    # CARTESIAN_SIDE_LENGTH = np.array([0.05, 0.05, 0.1]).reshape(1, 3)
+    # CARTESIAN_SIDE_LENGTH = np.array([0.21634, 0.14524, 0.12755]).reshape(1, 3)
+    CARTESIAN_SIDE_LENGTH = np.array([0.18634, 0.11524, 0.02]).reshape(1, 3)
+    CARTESIAN_KC = np.array([2e-4, 2e-4, 1e-6]).reshape(1, 3)
     QUATERNION_QG = np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178])
     QUATERNION_KO = 15
     IMG_W = 1440
     IMG_H = 1080
     IMG_WH = np.array([1440,1080])
     KESI_X_SCALE = 0.25
-
-pre_traj = "./data/0722/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_with_Js_no_update/"
+    CAM_HEIGHT = 1.38
 
 def MatrixMultiplication(params):
     L, theta, Js_hat, kesi_x, kesi_rall, J_pinv, kesi_q, kesi_x_prime = \
@@ -386,8 +388,8 @@ class AdaptiveRegionController(object):
             # print(J_base2cam)
 
             R_c2b = np.array([[-0.99851048, -0.0126514,   0.05307315],
-                [-0.01185424,  0.99981255,  0.01530807],
-                [-0.05325687,  0.01465613, -0.99847329]])
+                              [-0.01185424,  0.99981255,  0.01530807],
+                              [-0.05325687,  0.01465613, -0.99847329]])
             J_base2cam = np.block([[R_c2b,np.zeros((3,3))],[np.zeros((3,3)),R_c2b]])
 
             # print('J_base2cam',J_base2cam)
@@ -427,6 +429,8 @@ class AdaptiveRegionController(object):
                 # Js_hat_for_init = np.array([[-500,0,-500,-500,-500,500], [0,500,500,-500,-500,500]])
                 Js_hat_for_init = np.array([[-5000, 0, -1000, -100, -100, 100], \
                                             [-300, 4500, 1000, -100, -100, 100]])
+                Js_hat_for_init = np.array([[0, 0, -1000, -100, -100, 100], \
+                                            [-300, 4500, 1000, -100, -100, 100]])
                 self.Js_hat = Js_hat_for_init
 
         """
@@ -445,7 +449,7 @@ class AdaptiveRegionController(object):
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            self.L = np.eye(self.theta.n_k) * 3000
+            self.L = np.eye(self.theta.n_k) * 1000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -469,7 +473,7 @@ class AdaptiveRegionController(object):
         self.cartesian_quat_space_region.set_Ko(MyConstants.QUATERNION_KO)
 
         self.joint_space_region = JointSpaceRegion()
-        self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.0, 0, 0, 0]), 0.2, 0.4, np.array([0,0,0,1,0,0,0]), kq=10, kr=5, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
+        # self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.0, 0, 0, 0]), 0.3, 0.5, np.array([0,0,0,1,0,0,0]), kq=20, kr=10, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
 
     def kesi_x(self, x):
         return self.image_space_region.kesi_x(x.reshape(1, -1))
@@ -489,16 +493,17 @@ class AdaptiveRegionController(object):
         print('Dimension for vector theta: %d' % rbf.reshape(-1,).shape[0])
         return rbf
 
-    def update_Js_with_ps(self, x, quat):
+    def update_Js_with_ps(self, x, quat, z, update_mode=0):
+        x = x.reshape(-1,)
         ee_pose_quat = quat[[1, 2, 3, 0]]
         ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
         p_s_in_panda_EE = np.array([0.067, 0.08, -0.05])
         p_s = (ee_pose_mat @ p_s_in_panda_EE.reshape(3, 1)).reshape(-1,)
-        Z = 1
+        Z = MyConstants.CAM_HEIGHT - z
 
         R_b2c = np.array([[-0.99851048, -0.0126514,   0.05307315],
-                [-0.01185424,  0.99981255,  0.01530807],
-                [-0.05325687,  0.01465613, -0.99847329]])
+                          [-0.01185424,  0.99981255,  0.01530807],
+                          [-0.05325687,  0.01465613, -0.99847329]])
         Js = np.array([[MyConstants.FX_HAT / Z, 0,    - (x[0] - MyConstants.U0) / Z, 0, 0, 0], \
                         [0,    MyConstants.FY_HAT / Z, - (x[1] - MyConstants.V0) / Z, 0, 0, 0]])
         cross_mat = np.array([[0,        p_s[2], -p_s[1]],
@@ -509,12 +514,16 @@ class AdaptiveRegionController(object):
         Jvel = np.block([[np.eye(3), np.zeros((3, 3))], \
                         [np.zeros((3, 3)), cross_mat]])
 
-        return (Js @ Jrot @ Jvel).reshape(2, 6)
+        if update_mode == 0:
+            self.Js_hat = (Js @ Jrot @ Jvel).reshape(2, 6)
+            return self.Js_hat
+        else:
+            return (Js @ Jrot @ Jvel).reshape(2, 6)
 
     def get_Js_hat(self):
         return self.Js_hat
 
-    def get_u(self, J, d, r_t, r_o, q, x, lock, with_vision=False, update_mode = 0):
+    def get_u(self, J, d, r_t, r_o, q, x, with_vision=False, update_mode = 0):
         J_pinv = J.T @ np.linalg.pinv(J @ J.T)
 
         kesi_x = MyConstants.KESI_X_SCALE * self.kesi_x(x).reshape(-1, 1)  # (2, 1)
@@ -531,17 +540,25 @@ class AdaptiveRegionController(object):
 
         # print("self.Js_hat.T @ kesi_x",self.Js_hat.T @ kesi_x)
         # print("kesi_rall",kesi_rall)
+        value_to_be_compensated = 0  # initial value
         if with_vision:
             if update_mode==0:
-                updated_Js_hat = self.update_Js_with_ps(r_t.reshape(-1,), r_o.reshape(-1))
+                updated_Js_hat = self.update_Js_with_ps(x, r_o.reshape(-1,), r_t.reshape(-1,)[2])
                 u = - J_pinv @ (updated_Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)  # normal version in paper
             elif update_mode==-1:
                 u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)
             elif update_mode==1:
-                self.update(J, r_t, r_o, q, x, lock=lock)
+                self.update(J, r_t, r_o, q, x)
                 u = - J_pinv @ (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q)
             else:
                 raise ValueError('update_mode could only be -1,0,1 !')
+
+            # log the last terms in V_dot for debug
+            if update_mode != 0:
+                true_Js = self.update_Js_with_ps(x, r_o.reshape(-1,), r_t.reshape(-1,)[2], update_mode=update_mode).reshape(2, 6)
+                Js_tilde = true_Js - self.Js_hat
+                value_to_be_compensated = - 1e3 * (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q).T @ Js_tilde.T @ kesi_x
+                print('=====> value to be compensated: %.10f' % value_to_be_compensated)
         else:
             u = - J_pinv @ (kesi_rall + J @ kesi_q)
 
@@ -550,7 +567,7 @@ class AdaptiveRegionController(object):
         # print('u_image_part', (- J_pinv @ (self.Js_hat.T @ kesi_x)).reshape(-1,))
         # print('u_cartesian_part', (- J_pinv @ kesi_rall).reshape(-1,))
         # print('u_joint_part', (- J_pinv @ (J_pinv.T @ kesi_q)).reshape(-1,))
-        return u
+        return u, value_to_be_compensated
 
     def update(self, J=None, r_t=None, r_o=None, q=None, x=None, lock=None): # used when adaptive, if u are precise, don't use it
         print('==================================')
@@ -765,8 +782,10 @@ class ImageDebug(object):
 
 
 # 0702 yxj
-def test_adaptive_region_control(fa, lock, update_mode=0):
-    os.mkdir(pre_traj)
+def test_adaptive_region_control(fa, update_mode=0):
+
+    pre_traj = "./data/0723/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_"+str(update_mode)+"/"
+
     desired_position_bias = np.array([-170, -90])
 
     class vision_collection(object):
@@ -812,7 +831,7 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
             target[0] = target[0]+desired_position_bias[0]
             target[1] = target[1]+desired_position_bias[1]
             controller_adaptive.image_space_region.set_x_d(target)
-            controller_adaptive.image_space_region.set_Kv(np.array([2, 1]) / 5)
+            controller_adaptive.image_space_region.set_Kv(np.array([2, 2]) / 5)
             print('vision region is set!')
             print(data_c.x2)
             print(target)
@@ -821,8 +840,10 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
     f_list, p_list, kesi_x_list, pixel_1_list, pixel_2_list, time_list, Js_list=[], [], [], [], [], [], []
     q_and_manipubility_list = np.zeros((0, 8))
     f_quat_list,p_quat_list,quat_list,kesi_rall_list,position_list = [],[],[],[],[]
+    value_to_be_compensated_list = []
 
-    max_execution_time = 35.0
+    # max_execution_time = 10.0
+    max_execution_time = 30
 
     home_joints = fa.get_joints()
     fa.dynamic_joint_velocity(joints=home_joints,
@@ -859,11 +880,12 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
             region information
         """
 
-        # print('In Cartesian Region: ', controller_adaptive.cartesian_space_region.in_region(pose.translation.reshape(-1,)))
+        print('In Cartesian Region: ', controller_adaptive.cartesian_space_region.in_region(pose.translation.reshape(-1,)))
         # print('In Quat Region: ', controller_adaptive.cartesian_quat_space_region.in_region(pose.quaternion.reshape(-1,)))
         # print('In joint Region: ', controller_adaptive.joint_space_region.in_region(q_and_m[0, :7]))
         # print('In vision Region: ', controller_adaptive.image_space_region.in_region(data_c.x1))
-        # print('Current xyz: ', pose.translation.reshape(-1,))
+        print('Current xyz: ', pose.translation.reshape(-1,))
+        print('Joint4: ', fa.get_joints()[3])
 
         """
             unless the marker attached to gripper is seen
@@ -871,14 +893,15 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
         """
         if data_c.is_data_with_vision_1_ready():
             if not has_enter_vision_region_record:
+                controller_adaptive.cartesian_space_region.set_Kc(np.array([2e-4, 2e-4, 9e-6]).reshape(1, 3))
                 has_enter_vision_region = i
                 has_enter_vision_region_record=True
             print('In Vision Region: ', controller_adaptive.image_space_region.in_region(data_c.x1))
             # dq_d_ = pool.map(controller_adaptive.get_u, (J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, True, update_mode))
-            dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, lock=lock, with_vision=True, update_mode=update_mode)
+            dq_d_, value_to_be_compensated = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=True, update_mode=update_mode)
         else:
-            dq_d_ = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, lock=lock, with_vision=False, update_mode=update_mode)
-        # print('Js: ', controller_adaptive.Js_hat)
+            dq_d_, value_to_be_compensated = controller_adaptive.get_u(J, d, pose.translation, pose.quaternion, q_and_m[0, :7], data_c.x1, with_vision=False, update_mode=update_mode)
+        print('Js: ', controller_adaptive.Js_hat)
         get_dq_T = time.time()
         print('get dq: %.5f' % (get_dq_T - pre_calc_data_T))
         
@@ -913,6 +936,7 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
         quat_list.append(pose.quaternion.tolist())
         kesi_rall_list.append(controller_adaptive.kesi_rall)
         position_list.append(pose.translation)
+        value_to_be_compensated_list.append(value_to_be_compensated)
 
         logging_T = time.time()
         print('logging: %.5f' % (logging_T - dyn_msg_pub_T))
@@ -932,6 +956,7 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
         print('sleep: %.5f' % (sleep_T - logging_T))
         print('==================================')
   
+    os.mkdir(pre_traj)
     # vision part
     plt.figure()
     plt.subplot(1, 2, 1)
@@ -1036,6 +1061,12 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
     plt.plot(time_list,q_and_manipubility_list[:,0:7],label = 'kesi')
     plt.title('q')
     plt.savefig(pre_traj+'q.jpg')
+
+    plt.figure()
+    plt.plot(time_list, value_to_be_compensated_list,label = 'value')
+    plt.scatter(time_list[has_enter_vision_region], value_to_be_compensated_list[has_enter_vision_region], c='r')
+    plt.title('value to be compensated')
+    plt.savefig(pre_traj+'value_to_be_compensated.jpg')
     
     info = {'f_list': f_list, \
             'p_list': p_list, \
@@ -1049,7 +1080,8 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
             'p_quat_list':p_quat_list,\
             'kesi_rall_list':kesi_rall_list,\
             'position_list':position_list,\
-            'Js_list':Js_list}
+            'Js_list':Js_list,\
+            'value_to_be_compensated':value_to_be_compensated_list}
     with open(pre_traj + 'data.pkl', 'wb') as f:
         pickle.dump(info, f)
     plt.show()
@@ -1058,8 +1090,9 @@ def test_adaptive_region_control(fa, lock, update_mode=0):
 if __name__ == '__main__':
     fa = FrankaArm()
     # test_joint_space_region_control(fa=fa)
-    proc = psutil.Process()
-    proc.cpu_affinity([0, 1, 2, 3, 4, 5, 6, 7])
 
-    lock = Lock()
-    test_adaptive_region_control(fa=fa, lock=lock, update_mode=1)
+    # proc = psutil.Process()
+    # proc.cpu_affinity([0, 1, 2, 3, 4, 5, 6, 7])
+
+    # lock = Lock()
+    test_adaptive_region_control(fa=fa, update_mode=1)

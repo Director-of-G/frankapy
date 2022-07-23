@@ -316,6 +316,9 @@
     * `adaptive control`中,更新Js的代码实测执行较慢,瓶颈在于计算dW_hat的矩阵运算过程,每次大约需要0.2~0.3s. 这部分代码在单独的python文件运行,每次计算dW_hat也只需要约0.002s,即使`adaptive control`在同时运行.推测是操作系统对单个进程内存分配(速度)限制的问题?
     * 尝试使用`Multiprocessing.Pool`为计算矩阵运算的代码开启单独的进程,效果不明显,矩阵运算耗时约0.15s?
     * 下午通过某种代码的奇妙组合,矩阵运算的速度突然加快了,目前0.03~0.05s左右,17:00左右push到git仓库,并跑出一组理想的实验数据`/data/0723/my_adaptive_control_20220723_163653_with_Js_no_update`
+
+    * 晚上调出了有自适应收敛，无自适应不收敛的实验效果。有自适应收敛的效果是`my_adaptive_control_20220723_221648_1`，无自适应的效果是`my_adaptive_control_20220723_221313_-1`
+    去掉joint region的实验效果是`my_adaptive_control_20220723_223953_1`,效果并不好，不收敛（原因是没有joint region之后导致进入FOV姿势很正，最终导致kesi_x和orientation region抵消）
     
     
 ### 常用命令

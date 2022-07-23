@@ -12,11 +12,12 @@ import numpy as np
 # from pyquaternion import Quaternion
 
 fa = FrankaArm()
-fa.goto_gripper(width=0.01,
-                grasp=True,
-                speed=0.04,
-                force=10,
-                block=False)
+print(fa.get_pose().translation)
+# fa.goto_gripper(width=0.01,
+#                 grasp=True,
+#                 speed=0.04,
+#                 force=10,
+#                 block=False)
 # fa.open_gripper()
 # joints = fa.get_joints()
 # print(joints)
