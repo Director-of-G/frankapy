@@ -22,14 +22,16 @@ import time
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent.resolve()))
-print(sys.path)
-from my_utils import Quat
+# sys.path.append(str(Path(__file__).parent.parent.resolve()))
+# print(sys.path)
+# from my_utils import Quat
 
 from my_gzb_adaptive_control import CartesianSpaceRegion, CartesianQuatSpaceRegion, ImageSpaceRegion
 from torch.utils.tensorboard import SummaryWriter
 
 import pdb
+
+from calculate_dW_hat import calculate_dW_hat
 
 class MyConstants(object):
     FX_HAT = 3759.66467
@@ -451,9 +453,33 @@ def plot_image_region_vector_field():
     plt.quiver(AXIS_W, AXIS_H, kesi_x_field[..., 0], kesi_x_field[..., 1], color='red', pivot='mid', width=0.001)
     plt.show()
 
+"""
+def calculate_dW_hat(L,theta,Js_hat,kesi_x,kesi_rall,J_pinv,kesi_q,kesi_x_prime):
+
+dW_hat = - L @ theta @ (Js_hat.T @ kesi_x + kesi_rall + J_pinv.T @ kesi_q).T
+    dW_hat = dW_hat @ kesi_x_prime
+"""
+def test_matrix_operation():
+    L = np.eye(1000)
+    theta = np.random.rand(1000, 1)
+    Js_hat = np.random.rand(2, 6)
+    kesi_x = np.random.rand(2, 1)
+    kesi_rall = np.random.rand(6, 1)
+    kesi_q = np.random.rand(7, 1)
+    J_pinv = np.random.rand(7, 6)
+    kesi_x_prime = np.random.rand(6, 12)
+
+    start_T = time.time()
+    n_iters = 20000
+    for iter in range(n_iters):
+        calculate_dW_hat(L, theta, Js_hat, kesi_x, kesi_rall, J_pinv, kesi_q, kesi_x_prime)
+    end_T = time.time()
+    print('time per iter: %.5f' % ((end_T - start_T) / n_iters))
+
 
 if __name__ == '__main__':
     # test_zero_Jacobian()
     # test_plot_3D()
-    test_Image_Jacobian()
+    # test_Image_Jacobian()
     # plot_image_region_vector_field()
+    test_matrix_operation()

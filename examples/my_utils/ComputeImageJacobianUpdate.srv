@@ -1,0 +1,13 @@
+float32[] L
+float32[] theta
+float32[] Js_hat
+float32[] kesi_x
+float32[] kesi_rall
+float32[] J_pinv
+float32[] kesi_q
+float32[] kesi_x_prime
+
+---
+
+float32[] dW_hat
+float32 time

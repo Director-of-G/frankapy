@@ -18,6 +18,8 @@ from actionlib import SimpleActionClient
 from sensor_msgs.msg import JointState
 from franka_interface_msgs.msg import ExecuteSkillAction
 from franka_interface_msgs.srv import GetCurrentFrankaInterfaceStatusCmd
+sys.path.append('/home/roboticslab/yxj/ws_franka/devel/share')
+print(sys.path)
 from franka_gripper.msg import *
 
 from .skill_list import *
