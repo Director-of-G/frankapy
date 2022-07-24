@@ -70,14 +70,18 @@ class MyConstants(object):
     # CARTESIAN_SIDE_LENGTH = np.array([0.05, 0.05, 0.1]).reshape(1, 3)
     # CARTESIAN_SIDE_LENGTH = np.array([0.21634, 0.14524, 0.12755]).reshape(1, 3)
     CARTESIAN_SIDE_LENGTH = np.array([0.18634, 0.11524, 0.02]).reshape(1, 3)
+    # CARTESIAN_KC = np.array([2e-4, 2e-4, 1e-6]).reshape(1, 3) # 0723 good param!!!
     CARTESIAN_KC = np.array([2e-4, 2e-4, 1e-6]).reshape(1, 3)
     QUATERNION_QG = np.array([-0.2805967680249283, 0.6330528569977758, 0.6632800072901188, 0.2838309407825178])
-    QUATERNION_KO = 15
+    QUATERNION_KO = 1
+    QUATERNION_RANGE_COEFF = 15
     IMG_W = 1440
     IMG_H = 1080
     IMG_WH = np.array([1440,1080])
     KESI_X_SCALE = 0.25
     CAM_HEIGHT = 1.38
+    JS_HAT_FOR_INIT = np.array([[0, 0, -1000, -100, -100, 100], \
+                                [-300, 4500, 1000, -100, -100, 100]])
 
 def MatrixMultiplication(params):
     L, theta, Js_hat, kesi_x, kesi_rall, J_pinv, kesi_q, kesi_x_prime = \
@@ -96,6 +100,7 @@ def MatrixMultiplication(params):
 
 class ImageSpaceRegion(object):
     def __init__(self, x_d=None, b=None, Kv=None) -> None:
+        # x_d , b, Kv
         self.x_d = x_d  # (1, 2)
         self.b = b  # (1, 2)
         self.Kv = Kv  # float
@@ -125,6 +130,7 @@ class CartesianSpaceRegion(object):
             r_c is the desired Cartesian configuration, which is [x, y, z, r, p, y].
             r∈[-pi, pi], p∈[-pi/2, pi/2], y∈[-pi, pi], which is euler angle in the order of 'XYZ'
         """
+        # r_c , c , Kc
         self.r_c = r_c  # (1, 3)
         self.c = c  # (1, 3)
         self.Kc = Kc  # (1, 3)
@@ -192,13 +198,18 @@ class CartesianSpaceRegion(object):
         return (self.Kc * np.maximum(0, self.fc(r)) * partial_fc).reshape(1, -1)
 
 class CartesianQuatSpaceRegion(object):
-    def __init__(self, q_g:np.ndarray=None, Ko=1) -> None:
+    def __init__(self, q_g:np.ndarray=None, Ko=1, orient_range_coeff=1) -> None:
+        # q_g, Ko, 
         self.q_g = Quat(q_g)  # Quat
         self.q_diff = Quat()  # Quat
         self.Ko = Ko  # float
+        self.orient_range_coeff = orient_range_coeff
 
     def set_q_g(self, q_g: np.ndarray):
         self.q_g = Quat(q_g)  # Quat
+
+    def set_orient_range(self, coeff):
+        self.orient_range_coeff = coeff
 
     def set_Ko(self, Ko):
         self.Ko = Ko  # float
@@ -209,9 +220,9 @@ class CartesianQuatSpaceRegion(object):
         self.q_diff = q_unit.dq_(q_g_unit).unit_()
         # self.q_diff = q_g_unit.dq_(q_unit)
         if return_diff:
-            return self.Ko * self.q_diff.logarithm_(return_norm=True) - 1, self.q_diff
+            return self.orient_range_coeff * self.q_diff.logarithm_(return_norm=True) - 1, self.q_diff
         else:
-            return self.Ko * self.q_diff.logarithm_(return_norm=True) - 1
+            return self.orient_range_coeff * self.q_diff.logarithm_(return_norm=True) - 1
 
     def in_region(self, q: np.ndarray):
         q = Quat(q)
@@ -221,7 +232,7 @@ class CartesianQuatSpaceRegion(object):
     def Po(self, q:Quat):
         fo = self.fo(q)
 
-        return 0.5 * (np.maximum(0, fo)) ** 2
+        return 0.5 * self.Ko * (np.maximum(0, fo)) ** 2
 
     # deprecated
     def get_Jrot(self, q:Quat):
@@ -261,7 +272,7 @@ class CartesianQuatSpaceRegion(object):
         axis_normalized = axis / np.linalg.norm(axis, ord=2)
         if theta > math.pi:
             theta = - (2 * math.pi - theta)
-        return theta * axis_normalized.reshape(1, 3)
+        return self.Ko * theta * axis_normalized.reshape(1, 3)
         
 class JointSpaceRegion(object):
     def __init__(self) -> None:
@@ -429,8 +440,7 @@ class AdaptiveRegionController(object):
                 # Js_hat_for_init = np.array([[-500,0,-500,-500,-500,500], [0,500,500,-500,-500,500]])
                 Js_hat_for_init = np.array([[-5000, 0, -1000, -100, -100, 100], \
                                             [-300, 4500, 1000, -100, -100, 100]])
-                Js_hat_for_init = np.array([[0, 0, -1000, -100, -100, 100], \
-                                            [-300, 4500, 1000, -100, -100, 100]])
+                Js_hat_for_init = MyConstants.JS_HAT_FOR_INIT
                 self.Js_hat = Js_hat_for_init
 
         """
@@ -440,7 +450,7 @@ class AdaptiveRegionController(object):
         """
             adaptive control with xy coordinates
         """
-        # cfg = {'n_dim':2,'n_k_per_dim':75,'sigma':1,'pos_restriction':np.array([[0.05,0.35],[0.50,0.70]])}
+        # cfg = {'n_dim':2,'n_k_per_dim':100,'sigma':1,'pos_restriction':np.array([[0.05,0.35],[0.50,0.70]])}
         self.theta = RadialBF(cfg=cfg)
         self.theta.init_rbf_()
 
@@ -449,7 +459,7 @@ class AdaptiveRegionController(object):
                 raise ValueError('Dimension of L should be ' + str((self.n_k, self.n_k)) + '!')
             self.L = L
         else:
-            self.L = np.eye(self.theta.n_k) * 1000
+            self.L = np.eye(self.theta.n_k) * 10000
             # raise ValueError('Matrix L should not be empty!')
 
         if W_hat is not None:
@@ -471,9 +481,10 @@ class AdaptiveRegionController(object):
 
         self.cartesian_quat_space_region.set_q_g(MyConstants.QUATERNION_QG)  # grasping pose on the right
         self.cartesian_quat_space_region.set_Ko(MyConstants.QUATERNION_KO)
+        self.cartesian_quat_space_region.set_orient_range(MyConstants.QUATERNION_RANGE_COEFF)
 
         self.joint_space_region = JointSpaceRegion()
-        # self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.0, 0, 0, 0]), 0.3, 0.5, np.array([0,0,0,1,0,0,0]), kq=20, kr=10, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
+        self.joint_space_region.add_region_multi(np.array([0, 0, 0, -3.08, 0, 0, 0]), 0.38, 0.58, np.array([0,0,0,1,0,0,0]), kq=20, kr=10, inner=True) # avoid the joint 4 entering [-2.9,-2.3] 
 
     def kesi_x(self, x):
         return self.image_space_region.kesi_x(x.reshape(1, -1))
@@ -559,6 +570,10 @@ class AdaptiveRegionController(object):
                 Js_tilde = true_Js - self.Js_hat
                 value_to_be_compensated = - 1e3 * (self.Js_hat.T @ kesi_x + kesi_rall + J @ kesi_q).T @ Js_tilde.T @ kesi_x
                 print('=====> value to be compensated: %.10f' % value_to_be_compensated)
+                print('kesi_r: ', kesi_rall.flatten())
+                print('kesi_q: ', kesi_q.flatten())
+                print('kesi_x: ', kesi_x.flatten())
+                print('dqd_x: ', - J_pinv @ self.Js_hat.T @ kesi_x)
         else:
             u = - J_pinv @ (kesi_rall + J @ kesi_q)
 
@@ -567,7 +582,7 @@ class AdaptiveRegionController(object):
         # print('u_image_part', (- J_pinv @ (self.Js_hat.T @ kesi_x)).reshape(-1,))
         # print('u_cartesian_part', (- J_pinv @ kesi_rall).reshape(-1,))
         # print('u_joint_part', (- J_pinv @ (J_pinv.T @ kesi_q)).reshape(-1,))
-        return u, value_to_be_compensated
+        return u, float(value_to_be_compensated)
 
     def update(self, J=None, r_t=None, r_o=None, q=None, x=None, lock=None): # used when adaptive, if u are precise, don't use it
         print('==================================')
@@ -782,9 +797,9 @@ class ImageDebug(object):
 
 
 # 0702 yxj
-def test_adaptive_region_control(fa, update_mode=0):
+def test_adaptive_region_control(fa:FrankaArm, update_mode=0):
 
-    pre_traj = "./data/0723/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_"+str(update_mode)+"/"
+    pre_traj = "./data/0724/my_adaptive_control_"+time.strftime("%Y%m%d_%H%M%S", time.localtime(time.time()))+"_"+str(update_mode)+"/"
 
     desired_position_bias = np.array([-170, -90])
 
@@ -831,7 +846,7 @@ def test_adaptive_region_control(fa, update_mode=0):
             target[0] = target[0]+desired_position_bias[0]
             target[1] = target[1]+desired_position_bias[1]
             controller_adaptive.image_space_region.set_x_d(target)
-            controller_adaptive.image_space_region.set_Kv(np.array([2, 2]) / 5)
+            controller_adaptive.image_space_region.set_Kv(np.array([1, 1]) / 20)
             print('vision region is set!')
             print(data_c.x2)
             print(target)
@@ -843,7 +858,7 @@ def test_adaptive_region_control(fa, update_mode=0):
     value_to_be_compensated_list = []
 
     # max_execution_time = 10.0
-    max_execution_time = 30
+    max_execution_time = 30.0
 
     home_joints = fa.get_joints()
     fa.dynamic_joint_velocity(joints=home_joints,
@@ -894,6 +909,7 @@ def test_adaptive_region_control(fa, update_mode=0):
         if data_c.is_data_with_vision_1_ready():
             if not has_enter_vision_region_record:
                 controller_adaptive.cartesian_space_region.set_Kc(np.array([2e-4, 2e-4, 9e-6]).reshape(1, 3))
+                controller_adaptive.cartesian_quat_space_region.set_Ko(0)
                 has_enter_vision_region = i
                 has_enter_vision_region_record=True
             print('In Vision Region: ', controller_adaptive.image_space_region.in_region(data_c.x1))
@@ -941,7 +957,7 @@ def test_adaptive_region_control(fa, update_mode=0):
         logging_T = time.time()
         print('logging: %.5f' % (logging_T - dyn_msg_pub_T))
 
-        if time.time() - time_start >= max_execution_time:
+        if time.time() - time_start >= max_execution_time or fa.get_joints().flatten()[3] <= -3.0:
             # terminate dynamic joint velocity control
             term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - time_start, should_terminate=True)
             ros_msg = make_sensor_group_msg(
@@ -1026,7 +1042,6 @@ def test_adaptive_region_control(fa, update_mode=0):
     ax1.plot3D(position_array[:,0],position_array[:,1],position_array[:,2],label='traj')
     ax1.scatter(position_array[0,0],position_array[0,1],position_array[0,2],c='r',label='initial')
     ax1.scatter(position_array[has_enter_vision_region,0],position_array[has_enter_vision_region,1],position_array[has_enter_vision_region,2],label='enter')
-    has_enter_vision_region
     # ax1.scatter(position_array[200,0],position_array[200,1],position_array[200,2],c='b',label='t=5s')
     ax1.scatter(MyConstants.CARTESIAN_CENTER[0],MyConstants.CARTESIAN_CENTER[1],MyConstants.CARTESIAN_CENTER[2],c='g',label='goal region center')
     c = MyConstants.CARTESIAN_SIDE_LENGTH.reshape(-1,)

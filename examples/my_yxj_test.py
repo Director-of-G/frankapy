@@ -12,6 +12,7 @@ import numpy as np
 # from pyquaternion import Quaternion
 
 fa = FrankaArm()
+print(fa.get_joints())
 print(fa.get_pose().translation)
 # fa.goto_gripper(width=0.01,
 #                 grasp=True,

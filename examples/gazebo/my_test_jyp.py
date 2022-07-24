@@ -28,6 +28,7 @@ from pathlib import Path
 
 from my_gzb_adaptive_control import CartesianSpaceRegion, CartesianQuatSpaceRegion, ImageSpaceRegion
 from torch.utils.tensorboard import SummaryWriter
+import pickle
 
 import pdb
 
@@ -41,6 +42,9 @@ class MyConstants(object):
     IMG_H = 1080
     IMG_W = 1920
     CAM_HEIGHT = 1.50
+    JS_DEFAULT = np.array([[-3.82524232e+03,-3.16761358e+01,6.25549227e+01, 2.26163387e+00,-2.15635863e+02, 1.18316857e+01], \
+                                [-2.40806609e+01 ,1.11591279e+03, 5.33462365e+00,-5.43952564e+01,-4.04626424e+00, 1.09386941e+02]])
+    DATA_PATH = None
 
 class data_collection(object):  # to get Franka data from Gazebo
     def __init__(self) -> None:
@@ -90,7 +94,14 @@ class FrankaInfoStruct(object):
                                0.17479727175084528])  # (w, x, y, z)
         self.trans = np.array([-1, -1, 0.5])  # (deprecated, deprecated, z)
 
-def get_Js_hat(data_c):
+def get_Js_hat(data_c, default_value=False, default_Js=None):
+    if default_value:
+        if default_Js is not None:
+            Js = default_Js
+        else:
+            Js = MyConstants.JS_DEFAULT
+        return Js
+
     x = data_c.x.reshape(-1,)
     ee_pose_quat = data_c.quat[[1, 2, 3, 0]]
     ee_pose_mat = R.from_quat(ee_pose_quat).as_dcm()
@@ -112,7 +123,9 @@ def get_Js_hat(data_c):
     Jvel = np.block([[np.eye(3), np.zeros((3, 3))], \
                      [np.zeros((3, 3)), cross_mat]])
 
-    return (Js @ Jrot @ Jvel).reshape(2, 6)
+    Js = (Js @ Jrot @ Jvel).reshape(2, 6)
+
+    return Js
 
 def test_zero_Jacobian():
     class data_collection(object):
@@ -399,8 +412,8 @@ def plot_image_region_vector_field():
     # hyper-parameters
     IMG_W = 1920
     IMG_H = 1080
-    NUM_W = 48
-    NUM_H = 27
+    NUM_W = 24
+    NUM_H = 12
 
     W_LIST = np.linspace(0, IMG_W - 1, NUM_W).reshape(-1,)
     H_LIST = np.linspace(0, IMG_H - 1, NUM_H).reshape(-1,)
@@ -420,6 +433,7 @@ def plot_image_region_vector_field():
 
     vector_field = np.zeros((NUM_H, NUM_W, 2))
     kesi_x_field = np.zeros((NUM_H, NUM_W, 2))
+    start_T = time.time()
     for v_idx, v in enumerate(H_LIST):
         for u_idx, u in enumerate(W_LIST):
             # get kesi_x
@@ -429,7 +443,7 @@ def plot_image_region_vector_field():
             kesi_x_field[v_idx, u_idx, :] = - kesi_x.reshape(-1,)
 
             # get Js
-            Js = get_Js_hat(data_c)
+            Js = get_Js_hat(data_c, default_value=True, default_Js=None)
             # pdb.set_trace()
 
             # get unit vector V_i(x)
@@ -446,12 +460,103 @@ def plot_image_region_vector_field():
             V_c = (R_b2c @ V_b).reshape(3, 1)
             V_i = (R_c2i @ V_c).reshape(-1,)
             vector_field[v_idx, u_idx, :] = 1e3 * V_i
+    print('time cost: ', time.time() - start_T)
 
     # plot figure
-    pdb.set_trace()
     plt.quiver(AXIS_W, AXIS_H, vector_field[..., 0], vector_field[..., 1], color='blue', pivot='mid', width=0.001)
     plt.quiver(AXIS_W, AXIS_H, kesi_x_field[..., 0], kesi_x_field[..., 1], color='red', pivot='mid', width=0.001)
     plt.show()
+
+def plot_image_region_vector_field_animation():
+    """
+     plt.cla()
+            # for stopping simulation with the esc key.
+            plt.gcf().canvas.mpl_connect('key_release_event',
+                    lambda event: [exit(0) if event.key == 'escape' else None])
+            if ox is not None:
+                plt.plot(ox, oy, "xr", label="MPC")
+            plt.plot(cx, cy, "-r", label="course")
+            plt.plot(x, y, "ob", label="trajectory")
+            plt.plot(xref[0, :], xref[1, :], "xk", label="xref")
+            plt.plot(cx[target_ind], cy[target_ind], "xg", label="target")
+            plot_car(state.x, state.y, state.yaw, steer=di)
+            plt.axis("equal")
+            plt.grid(True)
+            plt.title("Time[s]:" + str(round(time, 2))
+                      + ", speed[km/h]:" + str(round(state.v * 3.6, 2)))
+            plt.pause(0.0001)
+
+    """
+    class PlotConstants(object):
+        IMG_W = 1440
+        IMG_H = 1080
+        NUM_W = 15
+        NUM_H = 15
+        DATA_PATH = '/home/roboticslab/yxj/frankapy/data' + '/0724' +'/my_debug_image_20220724_212412_1' + '/data.pkl'
+        VISION_DESIRED_BIAS = np.array([-170, -90])
+
+    R_b2c = np.array([[-0.99851048, -0.0126514,   0.05307315],
+                      [-0.01185424,  0.99981255,  0.01530807],
+                      [-0.05325687,  0.01465613, -0.99847329]])
+
+    W_LIST = np.linspace(0, PlotConstants.IMG_W - 1, PlotConstants.NUM_W).reshape(-1,)
+    H_LIST = np.linspace(0, PlotConstants.IMG_H - 1, PlotConstants.NUM_H).reshape(-1,)
+    AXIS_W, AXIS_H = np.meshgrid(W_LIST, H_LIST)
+
+    data = pickle.load(open(PlotConstants.DATA_PATH, 'rb'))
+    Js_list = data['Js_list']
+    Cartesian_pos_list = data['position_list']
+
+    image_space_region = ImageSpaceRegion(b=np.array([PlotConstants.IMG_W, PlotConstants.IMG_H]))
+    pixel_list = data['pixel_1_list']
+    vision_target = data['pixel_2_list'][0] + PlotConstants.VISION_DESIRED_BIAS
+
+    Js_list = Js_list[len(Js_list) - len(pixel_list):]
+
+    image_space_region.set_x_d(vision_target.flatten())
+    image_space_region.set_Kv(np.array([1, 1]) / 20)
+    vector_field = np.zeros((PlotConstants.NUM_H, PlotConstants.NUM_W, 2))
+    kesi_x_field = np.zeros((PlotConstants.NUM_H, PlotConstants.NUM_W, 2))
+
+    has_inverse_flag = False
+    
+    # for t_step in range(len(Js_list)):
+    for t_step in np.arange(0,len(Js_list),2):
+        print('t_step: ', t_step)
+        Js_hat = np.array(Js_list[t_step]).reshape(2, 6)
+        print(Js_hat)
+        Cartesian_pos = np.array(Cartesian_pos_list[t_step])
+        # print(Cartesian_pos)
+        pixel = pixel_list[t_step]
+        for v_idx, v in enumerate(H_LIST):
+            for u_idx, u in enumerate(W_LIST):
+                x = np.array([u, v]).reshape(1, 2)
+                kesi_x = image_space_region.kesi_x(x).reshape(2, 1)
+                kesi_x_field[v_idx, u_idx, :] = - kesi_x.reshape(-1,)
+
+                Js = Js_hat
+                R_c2i = compute_R_c2i(x, z=Cartesian_pos[2])
+                V_b = - (Js.T @ kesi_x).reshape(-1,)[:3]
+                V_b = V_b.reshape(3, 1)
+                V_c = (R_b2c @ V_b).reshape(3, 1)
+                V_i = (R_c2i @ V_c).reshape(-1,)
+                vector_field[v_idx, u_idx, :] = 1e3 * V_i
+
+        if t_step > 0:
+            plt.cla()
+        plt.gcf().canvas.mpl_connect('key_release_event',
+            lambda event: [exit(0) if event.key == 'escape' else None])
+        if True:
+            ax = plt.gca()
+            ax.invert_yaxis()
+            has_inverse_flag = True
+        plt.quiver(AXIS_W, AXIS_H, vector_field[..., 0], -vector_field[..., 1], color='blue', pivot='mid', width=0.001)
+        plt.quiver(AXIS_W, AXIS_H, kesi_x_field[..., 0], -kesi_x_field[..., 1], color='red', pivot='mid', width=0.001)
+        plt.scatter(pixel[0], pixel[1], c='g')
+
+        plt.pause(0.001)
+    plt.close("all")
+
 
 """
 def calculate_dW_hat(L,theta,Js_hat,kesi_x,kesi_rall,J_pinv,kesi_q,kesi_x_prime):
@@ -482,4 +587,6 @@ if __name__ == '__main__':
     # test_plot_3D()
     # test_Image_Jacobian()
     # plot_image_region_vector_field()
-    test_matrix_operation()
+    plot_image_region_vector_field_animation()
+    # test_matrix_operation()
+    pass

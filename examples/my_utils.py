@@ -7,6 +7,9 @@ from tokenize import Double
 import numpy as np
 import math
 
+from random import shuffle
+import pdb
+
 class Quat(object):  # quaternion class
     def __init__(self, value:np.ndarray=np.array([1, 0, 0, 0])) -> None:
         # in order of (w, x, y, z)
@@ -149,6 +152,9 @@ class RadialBF(object):  # radial basis function(RBF) class
             self.rbf_sigma2_ = np.array(self.sigma) ** 2
 
     def get_rbf_(self, r):
+        # shuffle_idx = np.arange(len(self.rbf_c_))
+        # shuffle(shuffle_idx)
+        # self.rbf_c_ = self.rbf_c_[shuffle_idx, :]
         r = r.reshape(1, self.n_dim)
         # print(r - self.rbf_c_)
         # print((np.linalg.norm(r - self.rbf_c_, ord=2, axis=1) ** 2).shape)
